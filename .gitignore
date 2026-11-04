@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases
+*.sqlite3
+*.db
+lifeos.db
+
+# Env / secrets — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Build / tooling
+dist/
+build/
+node_modules/
+.DS_Store
