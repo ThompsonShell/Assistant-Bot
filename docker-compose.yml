@@ -1,0 +1,51 @@
+# Private AI LifeOS — local development stack.
+# Brings up Postgres, Redis, and the FastAPI backend.
+#   cp .env.example .env   # then edit .env
+#   docker compose up --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lifeos
+      POSTGRES_PASSWORD: lifeos
+      POSTGRES_DB: lifeos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifeos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not published to the host by default — only the app needs it.
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    expose:
+      - "6379"
+
+  app:
+    build: ./backend
+    env_file: .env
+    environment:
+      # Override hosts to match compose service names regardless of .env.
+      DATABASE_URL: postgresql+psycopg://lifeos:lifeos@db:5432/lifeos
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
