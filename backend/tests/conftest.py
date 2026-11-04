@@ -13,6 +13,10 @@ os.environ.setdefault("ADMIN_PASSWORD", "Test-Passw0rd!")
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("AUTO_CREATE_TABLES", "true")
 os.environ.setdefault("LOGIN_RATE_LIMIT_PER_MINUTE", "5")
+# Isolate tests from any real GITHUB_TOKEN present in the host environment,
+# and never start the background scheduler during tests.
+os.environ["GITHUB_TOKEN"] = ""
+os.environ["ENABLE_SCHEDULER"] = "false"
 
 import fakeredis  # noqa: E402
 import pytest  # noqa: E402
@@ -29,7 +33,12 @@ ADMIN_PASSWORD = "Test-Passw0rd!"
 def app():
     engine = make_engine("sqlite+pysqlite:///:memory:")
     redis_client = fakeredis.FakeStrictRedis()
-    return create_app(engine=engine, redis_client=redis_client, run_bootstrap=True)
+    return create_app(
+        engine=engine,
+        redis_client=redis_client,
+        run_bootstrap=True,
+        start_scheduler=False,
+    )
 
 
 @pytest.fixture
@@ -43,3 +52,67 @@ def login(client: TestClient, totp_code: str | None = None):
     if totp_code is not None:
         body["totp_code"] = totp_code
     return client.post("/auth/login", json=body)
+
+
+# ── GitHub test helpers ──────────────────────────────────────────────
+
+PUSH_EVENT = {
+    "id": "1001",
+    "type": "PushEvent",
+    "actor": {"login": "alice"},
+    "repo": {"name": "octo/demo"},
+    "created_at": "2026-01-05T10:00:00Z",
+    "payload": {
+        "ref": "refs/heads/main",
+        "size": 2,
+        "commits": [{"message": "fix bug"}, {"message": "add feature"}],
+    },
+}
+
+PR_BOT_EVENT = {
+    "id": "1002",
+    "type": "PullRequestEvent",
+    "actor": {"login": "dependabot[bot]"},
+    "repo": {"name": "octo/demo"},
+    "created_at": "2026-01-05T11:00:00Z",
+    "payload": {
+        "action": "opened",
+        "number": 7,
+        "pull_request": {
+            "number": 7,
+            "title": "Bump lib",
+            "html_url": "https://github.com/octo/demo/pull/7",
+            "base": {"ref": "main"},
+        },
+    },
+}
+
+ACTION_EVENT = {
+    "id": "1003",
+    "type": "IssuesEvent",
+    "actor": {"login": "github-actions[bot]"},
+    "repo": {"name": "octo/demo"},
+    "created_at": "2026-01-05T12:00:00Z",
+    "payload": {
+        "action": "closed",
+        "issue": {"number": 3, "title": "flaky test", "html_url": "https://github.com/octo/demo/issues/3"},
+    },
+}
+
+SAMPLE_EVENTS = [PUSH_EVENT, PR_BOT_EVENT, ACTION_EVENT]
+
+
+class FakeGitHubClient:
+    """Mimics GitHubClient.repo_events with no network. Returns a 304 when the
+    caller presents the current ETag."""
+
+    def __init__(self, events, etag="ETAG-1"):
+        self.events = events
+        self.etag = etag
+        self.calls = 0
+
+    def repo_events(self, full_name, etag=None):
+        self.calls += 1
+        if etag == self.etag:
+            return None, self.etag
+        return self.events, self.etag

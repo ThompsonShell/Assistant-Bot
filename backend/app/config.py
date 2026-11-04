@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     login_rate_limit_per_minute: int = 5
 
+    # Display
+    display_timezone: str = "UTC"
+
+    # GitHub monitoring (read-only)
+    github_token: str | None = None
+    github_api_base: str = "https://api.github.com"
+    github_poll_interval_seconds: int = 120
+    # Optional: your own GitHub login, to distinguish "my" activity in analytics.
+    github_owner_login: str | None = None
+    enable_scheduler: bool = True
+
+    # Telegram notifications (to YOU only — never to contacts)
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"production", "prod"}

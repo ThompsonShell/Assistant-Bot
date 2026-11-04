@@ -5,9 +5,10 @@ own digital chief-of-staff. It watches your GitHub activity, plans your week,
 tracks productivity, and notifies you privately, with security and privacy as
 first-class requirements.
 
-> **Status:** Phase 1 — **Foundation** (secure single-user auth, audit log,
-> secret redaction, DB + migrations, containerized dev stack, tests).
-> GitHub monitoring, analytics, calendar/planning, and notifications come next.
+> **Status:** Phase 2 — **GitHub Monitoring** on top of the secure Foundation.
+> Polls watched repos, tags actors (human / bot / Action), stores events,
+> computes analytics, records notifications, and can push alerts to a private
+> Telegram bot. Calendar/planning and the web dashboard come next.
 
 ## Design decisions (so far)
 
@@ -107,6 +108,48 @@ TOTP setup/enable/enforcement).
 State-changing requests send the CSRF token (from the login/`me` response) in
 the `X-CSRF-Token` header. The session id lives in an HttpOnly cookie.
 
+## GitHub Monitoring (Phase 2)
+
+Watches repositories by **polling** (no public URL needed — works on a home
+machine). Each event is de-duplicated by its GitHub id, the actor is tagged,
+and a human-readable summary is stored. Notifications are recorded for the
+dashboard and, if configured, pushed to your private Telegram bot.
+
+**Setup:**
+1. Create a **fine-grained read-only PAT**
+   (https://github.com/settings/personal-access-tokens) with read access to
+   *Contents, Metadata, Issues, Pull requests*. Put it in `.env` as
+   `GITHUB_TOKEN`.
+2. (Optional) Create a Telegram bot via **@BotFather**, set `TELEGRAM_BOT_TOKEN`
+   and your numeric `TELEGRAM_CHAT_ID`. Without these, alerts still appear in
+   the dashboard feed.
+3. Start the app — a background poller runs every `GITHUB_POLL_INTERVAL_SECONDS`.
+   You can also poll once on demand: `python -m app.jobs.github_poll`.
+
+**Actor tagging:** `human`, `bot` (`*[bot]`), `github_action`
+(`github-actions[bot]`), `app`, or `unknown`. It **never** claims a commit was
+"AI-generated" — that can't be reliably detected from GitHub metadata, so
+AI-assisted work is indistinguishable from human work here and is tagged
+`human`.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/github/repos` | list watched repos |
+| POST | `/github/repos` | `{owner, name}` — start watching (CSRF) |
+| DELETE | `/github/repos/{id}` | stop watching (CSRF); events are kept |
+| GET | `/github/events` | activity feed; filters: `repo`, `actor_type`, `limit` |
+| GET | `/github/analytics?range=` | `today\|yesterday\|week\|last_week\|month\|last_month\|year` |
+| GET | `/github/notifications` | delivery history |
+| POST | `/github/poll` | poll all watched repos now (CSRF) |
+
+Analytics are computed from **stored real data** and labelled as *activity
+volume, not productivity*. Ranges honour `DISPLAY_TIMEZONE`.
+
+> **Privacy/security:** GitHub access is **read-only**. The Telegram channel
+> only ever messages **you** (your own chat id). No code path sends a message
+> to any contact — a hard project rule. Tokens are never logged or returned by
+> any endpoint; raw event payloads are redacted before storage.
+
 ## Security posture
 
 - No public registration; exactly one user.
@@ -129,8 +172,13 @@ backend/app/
   security/          passwords, TOTP, sessions, rate limit, CSRF, deps
   audit/             audit-log service
   providers/         AI provider interface + DeterministicProvider (no-AI)
-  api/               health + auth routes
-  main.py            application factory
-backend/alembic/     migrations
-backend/tests/       pytest suite (SQLite + fakeredis)
+  integrations/github/  client, actor tagging, event summarizer, poller
+  notifications/     channel interface + Telegram + dashboard + notifier
+  analytics/         timezone-aware ranges + GitHub metrics
+  jobs/              background poll job (CLI + scheduler)
+  models/            User, AuditLog, GitHubRepo, GitHubEvent, Notification
+  api/               health + auth + github routes
+  main.py            application factory (+ optional poll scheduler)
+backend/alembic/     migrations (0001 foundation, 0002 github monitoring)
+backend/tests/       pytest suite (SQLite + fakeredis, no network)
 ```

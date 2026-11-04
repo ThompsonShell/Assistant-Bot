@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from . import __version__
 from .api import auth as auth_api
+from .api import github as github_api
 from .api import health as health_api
 from .config import settings
 from .db import Base, make_engine, make_sessionmaker
@@ -62,11 +63,41 @@ def bootstrap_admin(session_local: sessionmaker) -> None:
         )
 
 
+def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
+    """Start the background GitHub poll loop (best-effort; optional dependency)."""
+    if not (settings.enable_scheduler and settings.github_token):
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        from .jobs.github_poll import run_poll_once
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("scheduler not started: %s", str(exc)[:200])
+        return
+
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(
+        lambda: run_poll_once(session_local),
+        "interval",
+        seconds=max(30, settings.github_poll_interval_seconds),
+        id="github_poll",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.start()
+    app.state.scheduler = scheduler
+    logger.info(
+        "github poll scheduler started",
+        extra={"extra_fields": {"interval_s": settings.github_poll_interval_seconds}},
+    )
+
+
 def create_app(
     *,
     engine: Engine | None = None,
     redis_client=None,
     run_bootstrap: bool = True,
+    start_scheduler: bool = True,
 ) -> FastAPI:
     configure_logging(settings.log_level)
 
@@ -101,5 +132,15 @@ def create_app(
 
     app.include_router(health_api.router)
     app.include_router(auth_api.router)
+    app.include_router(github_api.router)
+
+    if start_scheduler:
+        _start_scheduler(app, session_local)
+
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        scheduler = getattr(app.state, "scheduler", None)
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
 
     return app
