@@ -67,6 +67,11 @@ set -a
 source "$ROOT/.env"
 set +a
 
+# Free port 8000 if a previous instance is still running.
+pkill -f "uvicorn app.main" 2>/dev/null || true
+if command -v fuser >/dev/null 2>&1; then fuser -k 8000/tcp 2>/dev/null || true; fi
+sleep 1
+
 echo "==> Starting API at http://localhost:8000  (docs: http://localhost:8000/docs)"
 echo "    Login with the username/password from your .env file."
 echo "    Press Ctrl+C to stop."
