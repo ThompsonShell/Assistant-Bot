@@ -39,6 +39,20 @@ class GitHubClient:
         resp.raise_for_status()
         return resp.json(), resp.headers.get("ETag")
 
+    def repo_commits(
+        self, full_name: str, per_page: int = 30
+    ) -> list[dict[str, Any]]:
+        """Fetch recent commits for ``owner/name`` (works for private repos and
+        has no events-feed delay)."""
+        resp = self._http.get(
+            f"/repos/{full_name}/commits", params={"per_page": per_page}
+        )
+        if resp.status_code in (404, 409):
+            # 409 = empty repository; 404 = not found / no access.
+            return []
+        resp.raise_for_status()
+        return resp.json()
+
 
 def make_github_client(token: str | None = None) -> GitHubClient:
     token = token or settings.github_token

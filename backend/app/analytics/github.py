@@ -33,6 +33,7 @@ def github_summary(
     return {
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "total_events": len(events),
+        "commits": by_type.get("Commit", 0),
         "pushes": by_type.get("PushEvent", 0),
         "pull_requests": by_type.get("PullRequestEvent", 0),
         "pull_request_reviews": by_type.get("PullRequestReviewEvent", 0),

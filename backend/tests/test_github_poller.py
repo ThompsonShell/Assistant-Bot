@@ -58,6 +58,30 @@ def test_poll_dedups_even_without_etag():
     assert db.query(GitHubEvent).count() == 3
 
 
+COMMIT_SAMPLE = [
+    {
+        "sha": "abc123def456",
+        "html_url": "https://github.com/octo/demo/commit/abc123def456",
+        "commit": {"author": {"name": "Alice", "date": "2026-01-06T09:00:00Z"}, "message": "Fix things\n\nbody"},
+        "author": {"login": "alice", "type": "User"},
+    }
+]
+
+
+def test_poll_ingests_commits():
+    db = _session()
+    repo = _repo(db)
+    client = FakeGitHubClient([], etag="X", commits=COMMIT_SAMPLE)
+    assert poll_repo(db, client, repo) == 1
+    ev = db.query(GitHubEvent).filter(GitHubEvent.type == "Commit").one()
+    assert ev.gh_id == "commit:abc123def456"
+    assert ev.actor_login == "alice"
+    assert ev.title == "committed abc123d"
+    assert ev.summary == "Fix things"
+    # Polling again doesn't duplicate the commit.
+    assert poll_repo(db, client, repo) == 0
+
+
 def test_poll_records_notifications():
     db = _session()
     repo = _repo(db)

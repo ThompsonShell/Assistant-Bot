@@ -106,13 +106,17 @@ class FakeGitHubClient:
     """Mimics GitHubClient.repo_events with no network. Returns a 304 when the
     caller presents the current ETag."""
 
-    def __init__(self, events, etag="ETAG-1"):
+    def __init__(self, events, etag="ETAG-1", commits=None):
         self.events = events
         self.etag = etag
         self.calls = 0
+        self.commits = commits or []
 
     def repo_events(self, full_name, etag=None):
         self.calls += 1
         if etag == self.etag:
             return None, self.etag
         return self.events, self.etag
+
+    def repo_commits(self, full_name, per_page=30):
+        return self.commits

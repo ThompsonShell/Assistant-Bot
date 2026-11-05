@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Private AI LifeOS</title>
+<style>
+  :root {
+    --bg: #0b0f17; --panel: #131a27; --panel2: #1a2233; --line: #243049;
+    --text: #e6edf6; --muted: #8aa0bd; --accent: #4f8cff; --accent2: #3ad29f;
+    --warn: #ffb86b; --danger: #ff6b6b; --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  button { cursor: pointer; font: inherit; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+
+  /* Login */
+  .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 22px; }
+  .login-card { width: 100%; max-width: 360px; }
+  .login-card h1 { font-size: 20px; margin: 0 0 4px; }
+  .field { margin: 14px 0; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  input, select { width: 100%; padding: 11px 12px; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 10px; color: var(--text); outline: none; }
+  input:focus { border-color: var(--accent); }
+  .btn { display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+    padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel2); color: var(--text); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; }
+  .btn.small { padding: 7px 10px; font-size: 13px; }
+  .btn.ghost { background: transparent; }
+  .err { color: var(--danger); font-size: 13px; min-height: 18px; margin-top: 8px; }
+
+  /* App shell */
+  .topbar { display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0;
+    background: rgba(11,15,23,.85); backdrop-filter: blur(8px); z-index: 5; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent2);
+    box-shadow: 0 0 10px var(--accent2); }
+  .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px; }
+  .stat .n { font-size: 28px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-top: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; display: flex; justify-content: space-between;
+    align-items: center; }
+  .row { display: flex; gap: 8px; align-items: center; }
+
+  .feed { display: flex; flex-direction: column; gap: 10px; max-height: 460px; overflow: auto; }
+  .ev { border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px; background: var(--panel2); }
+  .ev .top { display: flex; justify-content: space-between; gap: 8px; }
+  .ev .who { font-weight: 600; }
+  .ev .sum { color: var(--muted); font-size: 13px; margin-top: 4px; word-break: break-word; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--muted); white-space: nowrap; }
+  .tag.human { color: #9fe8c6; border-color: #295c48; }
+  .tag.bot, .tag.github_action, .tag.app { color: #ffd59e; border-color: #5c4a29; }
+  .time { color: var(--muted); font-size: 12px; }
+
+  .chart { display: flex; align-items: flex-end; gap: 6px; height: 120px; margin-top: 8px; }
+  .bar { flex: 1; background: linear-gradient(180deg, var(--accent), #2b5fb3);
+    border-radius: 6px 6px 0 0; min-height: 3px; position: relative; }
+  .bar span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center;
+    font-size: 10px; color: var(--muted); }
+
+  .repo { display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .repo:last-child { border-bottom: none; }
+  .list { display: flex; flex-direction: column; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--line); padding: 10px 16px;
+    border-radius: 10px; opacity: 0; transition: opacity .2s; z-index: 50; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 820px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login" class="login-wrap">
+  <div class="card login-card">
+    <div class="row" style="gap:10px;margin-bottom:10px"><span class="dot"></span>
+      <h1>Private AI LifeOS</h1></div>
+    <p class="muted" style="margin:0 0 6px;font-size:13px">Sign in to your private dashboard</p>
+    <div class="field"><label>Username</label><input id="u" autocomplete="username" /></div>
+    <div class="field"><label>Password</label><input id="p" type="password" autocomplete="current-password" /></div>
+    <div class="field" id="totpField"><label>2FA code (if enabled)</label><input id="t" inputmode="numeric" placeholder="optional" /></div>
+    <button class="btn primary" id="loginBtn">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> Private AI LifeOS</div>
+    <div class="row">
+      <select id="range" class="btn small">
+        <option value="today">Today</option>
+        <option value="week" selected>This week</option>
+        <option value="month">This month</option>
+        <option value="year">This year</option>
+      </select>
+      <button class="btn small" id="pollBtn">⟳ Poll now</button>
+      <button class="btn small ghost" id="logoutBtn">Logout</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="stats" id="stats"></div>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Activity feed <button class="btn small" id="refreshFeed">Refresh</button></h2>
+        <div class="feed" id="feed"></div>
+      </div>
+
+      <div>
+        <div class="panel" style="margin-bottom:16px">
+          <h2>Activity by day</h2>
+          <div class="chart" id="chart"></div>
+          <div style="height:22px"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:16px">
+          <h2>Watched repositories</h2>
+          <div class="list" id="repos"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="repoOwner" placeholder="owner" style="flex:1" />
+            <input id="repoName" placeholder="repo" style="flex:1" />
+            <button class="btn small primary" style="width:auto" id="addRepo">Add</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Notifications</h2>
+          <p class="muted" id="telegramStatus" style="font-size:13px;margin:0 0 10px"></p>
+          <button class="btn small" id="testNotif">Send test notification</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let CSRF = "";
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2600);
+}
+async function api(path, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (opts.method && opts.method !== "GET") {
+    opts.headers["X-CSRF-Token"] = CSRF;
+    opts.headers["Content-Type"] = "application/json";
+  }
+  const r = await fetch(path, opts);
+  if (r.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  if (!r.ok) {
+    let d; try { d = await r.json(); } catch { d = {}; }
+    throw new Error(d.detail || ("Error " + r.status));
+  }
+  return r.status === 204 ? null : r.json();
+}
+function fmtTime(iso) {
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function showLogin() { $("app").classList.add("hidden"); $("login").classList.remove("hidden"); }
+function showApp() { $("login").classList.add("hidden"); $("app").classList.remove("hidden"); }
+
+async function login() {
+  $("loginErr").textContent = "";
+  try {
+    const body = { username: $("u").value, password: $("p").value };
+    if ($("t").value.trim()) body.totp_code = $("t").value.trim();
+    const res = await api("/auth/login", { method: "POST", body: JSON.stringify(body) });
+    CSRF = res.csrf_token;
+    showApp(); loadAll();
+  } catch (e) { $("loginErr").textContent = e.message || "Login failed"; }
+}
+
+async function boot() {
+  try { const me = await api("/auth/me"); CSRF = me.csrf_token; showApp(); loadAll(); }
+  catch { showLogin(); }
+}
+
+async function loadAll() { await Promise.all([loadAnalytics(), loadFeed(), loadRepos(), loadChannels()]); }
+
+async function loadAnalytics() {
+  const range = $("range").value;
+  const a = await api("/github/analytics?range=" + range);
+  const cards = [
+    ["Commits", a.commits], ["Total events", a.total_events],
+    ["Pull requests", a.pull_requests], ["Issues", a.issues],
+  ];
+  $("stats").innerHTML = cards.map(([l, n]) =>
+    `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+
+  const days = a.by_day || {};
+  const keys = Object.keys(days);
+  const max = Math.max(1, ...Object.values(days));
+  $("chart").innerHTML = keys.length ? keys.map(k => {
+    const h = Math.round((days[k] / max) * 100);
+    const label = k.slice(5);
+    return `<div class="bar" style="height:${h}%" title="${k}: ${days[k]}"><span>${label}</span></div>`;
+  }).join("") : `<p class="muted" style="font-size:13px">No activity in this range yet.</p>`;
+}
+
+async function loadFeed() {
+  const events = await api("/github/events?limit=40");
+  if (!events.length) {
+    $("feed").innerHTML = `<p class="muted" style="font-size:13px">No events yet. Add a repo and click “Poll now”.</p>`;
+    return;
+  }
+  $("feed").innerHTML = events.map(e => `
+    <div class="ev">
+      <div class="top">
+        <div class="who">${esc(e.actor_login)} <span class="muted" style="font-weight:400">${esc(e.title)}</span></div>
+        <span class="tag ${e.actor_type}">${e.actor_type}</span>
+      </div>
+      ${e.summary ? `<div class="sum">${esc(e.summary)}</div>` : ""}
+      <div class="row" style="justify-content:space-between;margin-top:6px">
+        <span class="time">${esc(e.repo_full_name)} · ${fmtTime(e.created_at)}</span>
+        ${e.url ? `<a href="${e.url}" target="_blank" class="time">open ↗</a>` : ""}
+      </div>
+    </div>`).join("");
+}
+
+async function loadRepos() {
+  const repos = await api("/github/repos");
+  $("repos").innerHTML = repos.length ? repos.map(r => `
+    <div class="repo">
+      <div>${esc(r.full_name)}<div class="muted" style="font-size:11px">
+        ${r.last_polled_at ? "last polled " + fmtTime(r.last_polled_at) : "not polled yet"}</div></div>
+      <button class="btn small ghost" onclick="removeRepo(${r.id})">✕</button>
+    </div>`).join("") : `<p class="muted" style="font-size:13px">No repositories watched yet.</p>`;
+}
+
+async function loadChannels() {
+  const c = await api("/notifications/channels");
+  $("telegramStatus").textContent = c.telegram_configured
+    ? "Telegram: connected ✓" : "Telegram: not configured (set TELEGRAM_* in .env)";
+}
+
+async function removeRepo(id) {
+  try { await api("/github/repos/" + id, { method: "DELETE" }); toast("Removed"); loadRepos(); }
+  catch (e) { toast(e.message); }
+}
+function esc(s) { return (s ?? "").toString().replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+$("loginBtn").onclick = login;
+$("p").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+$("logoutBtn").onclick = async () => { try { await api("/auth/logout", { method: "POST" }); } catch {} showLogin(); };
+$("range").onchange = loadAnalytics;
+$("refreshFeed").onclick = loadFeed;
+$("pollBtn").onclick = async () => {
+  $("pollBtn").textContent = "⏳ Polling…";
+  try { const r = await api("/github/poll", { method: "POST" });
+    const n = Object.values(r.polled).reduce((a, b) => a + (b > 0 ? b : 0), 0);
+    toast(n + " new item(s)"); await loadAll(); }
+  catch (e) { toast(e.message); }
+  $("pollBtn").textContent = "⟳ Poll now";
+};
+$("addRepo").onclick = async () => {
+  const owner = $("repoOwner").value.trim(), name = $("repoName").value.trim();
+  if (!owner || !name) return toast("Enter owner and repo");
+  try { await api("/github/repos", { method: "POST", body: JSON.stringify({ owner, name }) });
+    $("repoOwner").value = ""; $("repoName").value = ""; toast("Added"); loadRepos(); }
+  catch (e) { toast(e.message); }
+};
+$("testNotif").onclick = async () => {
+  try { const r = await api("/notifications/test", { method: "POST" });
+    const tg = r.results.find(x => x.channel === "telegram");
+    toast(tg ? (tg.delivered ? "Sent to Telegram ✓" : "Telegram failed") : "Saved (no Telegram configured)"); }
+  catch (e) { toast(e.message); }
+};
+
+boot();
+</script>
+</body>
+</html>

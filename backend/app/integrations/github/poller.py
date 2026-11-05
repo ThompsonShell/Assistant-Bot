@@ -30,31 +30,21 @@ def _parse_iso(value: str | None) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def poll_repo(
-    db: Session,
-    client: GitHubClient,
-    repo: GitHubRepo,
-    notifier: SupportsNotify | None = None,
-) -> int:
-    """Poll one repository. Returns the number of NEW events stored."""
-    events, new_etag = client.repo_events(repo.full_name, repo.etag)
-    repo.last_polled_at = _utcnow()
-
-    if events is None:  # 304 Not Modified
-        db.commit()
-        return 0
-
-    repo.etag = new_etag
-
-    ids = [str(e.get("id")) for e in events]
-    existing = {
+def _existing_ids(db: Session, ids: list[str]) -> set[str]:
+    if not ids:
+        return set()
+    return {
         row[0]
         for row in db.query(GitHubEvent.gh_id).filter(GitHubEvent.gh_id.in_(ids)).all()
     }
 
+
+def _ingest_events(
+    db: Session, repo: GitHubRepo, events: list[dict], notifier: SupportsNotify | None
+) -> int:
+    existing = _existing_ids(db, [str(e.get("id")) for e in events])
     new_count = 0
-    # Oldest first so stored/notified order matches real chronology.
-    for ev in reversed(events):
+    for ev in reversed(events):  # oldest first
         gh_id = str(ev.get("id"))
         if gh_id in existing:
             continue
@@ -82,12 +72,79 @@ def poll_repo(
         new_count += 1
         if notifier is not None:
             notifier.notify_github_event(db, obj)
+    return new_count
+
+
+def _ingest_commits(
+    db: Session, repo: GitHubRepo, commits: list[dict], notifier: SupportsNotify | None
+) -> int:
+    existing = _existing_ids(db, [f"commit:{c.get('sha')}" for c in commits])
+    new_count = 0
+    for c in reversed(commits):  # oldest first
+        sha = c.get("sha") or ""
+        gh_id = f"commit:{sha}"
+        if not sha or gh_id in existing:
+            continue
+        commit = c.get("commit") or {}
+        commit_author = commit.get("author") or {}
+        gh_author = c.get("author") or {}
+        login = gh_author.get("login") or commit_author.get("name") or "unknown"
+        message = (commit.get("message") or "").splitlines()[0] if commit.get("message") else ""
+        obj = GitHubEvent(
+            gh_id=gh_id,
+            repo_full_name=repo.full_name,
+            type="Commit",
+            action=None,
+            actor_login=login,
+            actor_type=classify_actor(gh_author.get("login") or login, gh_author.get("type")),
+            branch=None,
+            number=None,
+            title=f"committed {sha[:7]}",
+            summary=message or None,
+            url=c.get("html_url"),
+            created_at=_parse_iso(commit_author.get("date")),
+            ingested_at=_utcnow(),
+            raw=redact(c),
+        )
+        db.add(obj)
+        existing.add(gh_id)
+        new_count += 1
+        if notifier is not None:
+            notifier.notify_github_event(db, obj)
+    return new_count
+
+
+def poll_repo(
+    db: Session,
+    client: GitHubClient,
+    repo: GitHubRepo,
+    notifier: SupportsNotify | None = None,
+) -> int:
+    """Poll one repository (events feed + commits). Returns NEW items stored."""
+    repo.last_polled_at = _utcnow()
+    new_count = 0
+
+    # 1) Events feed (pushes, PRs, issues, ...) — great for public repos.
+    events, new_etag = client.repo_events(repo.full_name, repo.etag)
+    if events is not None:  # None == 304 Not Modified
+        repo.etag = new_etag
+        new_count += _ingest_events(db, repo, events, notifier)
+
+    # 2) Commits directly — reliable for private repos and has no feed delay.
+    try:
+        commits = client.repo_commits(repo.full_name)
+        new_count += _ingest_commits(db, repo, commits, notifier)
+    except Exception as exc:  # noqa: BLE001 - commits are best-effort
+        logger.warning(
+            "github commits fetch failed",
+            extra={"extra_fields": {"repo": repo.full_name, "error": str(exc)[:200]}},
+        )
 
     db.commit()
     if new_count:
         logger.info(
-            "github poll stored events",
-            extra={"extra_fields": {"repo": repo.full_name, "new_events": new_count}},
+            "github poll stored items",
+            extra={"extra_fields": {"repo": repo.full_name, "new_items": new_count}},
         )
     return new_count
 
