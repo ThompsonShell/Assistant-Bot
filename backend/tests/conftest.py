@@ -17,6 +17,12 @@ os.environ.setdefault("LOGIN_RATE_LIMIT_PER_MINUTE", "5")
 # and never start the background scheduler during tests.
 os.environ["GITHUB_TOKEN"] = ""
 os.environ["ENABLE_SCHEDULER"] = "false"
+# Isolate tests from any ambient Claude credentials; force the deterministic provider.
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = ""
+os.environ["USE_CLAUDE_SUBSCRIPTION"] = "false"
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
 
 import fakeredis  # noqa: E402
 import pytest  # noqa: E402
@@ -38,6 +44,7 @@ def app():
         redis_client=redis_client,
         run_bootstrap=True,
         start_scheduler=False,
+        start_telegram=False,
     )
 
 

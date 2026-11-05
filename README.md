@@ -5,10 +5,38 @@ own digital chief-of-staff. It watches your GitHub activity, plans your week,
 tracks productivity, and notifies you privately, with security and privacy as
 first-class requirements.
 
-> **Status:** Phase 2 — **GitHub Monitoring** on top of the secure Foundation.
-> Polls watched repos, tags actors (human / bot / Action), stores events,
-> computes analytics, records notifications, and can push alerts to a private
-> Telegram bot. Calendar/planning and the web dashboard come next.
+> **Status:** Phase 3 — **Dashboard + two-way Telegram bot + Claude chat.**
+> On top of GitHub monitoring and analytics: a web dashboard, a private Telegram
+> bot (commands + free-text chat), and a Claude AI provider you connect by API
+> key or (opt-in) your Claude subscription. Calendar/planning comes next.
+
+## Telegram bot & Claude chat (Phase 3)
+
+The Telegram bot responds **only to your chat id** (everyone else is refused)
+and offers commands plus free-text chat:
+
+- `/today`, `/week`, `/month` — GitHub activity analytics
+- `/github` — latest events · `/repos` — watched repos · `/help`
+- any other message → answered by **Claude** (if connected)
+
+### Connecting Claude — two options
+
+| | Option A — Claude API *(recommended)* | Option B — Claude subscription *(opt-in)* |
+|---|---|---|
+| How | `ANTHROPIC_API_KEY` from console.anthropic.com | Claude Agent SDK + your `claude` login / `CLAUDE_CODE_OAUTH_TOKEN` |
+| Cost | Pay-as-you-go (cheap for one user) | Included in your Pro/Max plan |
+| Support | **Fully supported** by Anthropic | ⚠️ Gray area — see note |
+| Setup | set `ANTHROPIC_API_KEY` | `pip install claude-agent-sdk`, `claude setup-token`, set `USE_CLAUDE_SUBSCRIPTION=true` |
+
+> **⚠️ Policy note (Option B):** Anthropic's Agent SDK docs state that third-party
+> products/agents should authenticate with an **API key**, not a claude.ai
+> (Pro/Max) subscription login. A private, single-user tool is a gray area the
+> docs don't explicitly permit. The `CLAUDE_CODE_OAUTH_TOKEN` mechanism itself is
+> official (`claude setup-token`), but using it to power a bot is at your own
+> discretion. If in doubt, use Option A.
+
+Without either, the bot still runs: commands work, and chat replies that AI
+isn't connected (deterministic fallback — no cost, no key).
 
 ## Design decisions (so far)
 

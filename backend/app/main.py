@@ -94,12 +94,30 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
     )
 
 
+def _start_telegram_bot(app: FastAPI) -> None:
+    """Start the two-way Telegram bot in a daemon thread (best-effort)."""
+    if not (settings.telegram_bot_token and settings.telegram_chat_id):
+        return
+    try:
+        import threading
+
+        from .jobs.telegram_bot import run_bot
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("telegram bot not started: %s", str(exc)[:200])
+        return
+    thread = threading.Thread(target=run_bot, name="telegram-bot", daemon=True)
+    thread.start()
+    app.state.telegram_thread = thread
+    logger.info("telegram bot thread started")
+
+
 def create_app(
     *,
     engine: Engine | None = None,
     redis_client=None,
     run_bootstrap: bool = True,
     start_scheduler: bool = True,
+    start_telegram: bool = True,
 ) -> FastAPI:
     configure_logging(settings.log_level)
 
@@ -140,6 +158,9 @@ def create_app(
 
     if start_scheduler:
         _start_scheduler(app, session_local)
+
+    if start_telegram:
+        _start_telegram_bot(app)
 
     @app.on_event("shutdown")
     def _shutdown() -> None:

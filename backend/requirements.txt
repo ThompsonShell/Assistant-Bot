@@ -11,3 +11,4 @@ pyotp==2.9.0
 python-multipart==0.0.20
 httpx==0.28.1
 APScheduler==3.11.0
+anthropic==2.6.0

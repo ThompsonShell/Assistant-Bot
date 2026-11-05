@@ -58,6 +58,17 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
 
+    # AI provider (Claude). Two ways to connect:
+    #  1) ANTHROPIC_API_KEY  -> Claude API (official, pay-as-you-go). Recommended.
+    #  2) Subscription via Claude Agent SDK (CLAUDE_CODE_OAUTH_TOKEN or a local
+    #     `claude` login). See README for the policy caveat.
+    anthropic_api_key: str | None = None
+    anthropic_model: str = "claude-sonnet-5-5"
+    # Subscription path (opt-in):
+    use_claude_subscription: bool = False
+    claude_code_oauth_token: str | None = None
+    claude_agent_model: str = "sonnet"
+
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in {"production", "prod"}

@@ -29,3 +29,13 @@ class AIProvider(Protocol):
     def plan(self, instruction: str, *, context: dict[str, Any] | None = None) -> PlanResult:
         """Turn a natural-language instruction into a structured plan."""
         ...
+
+    def chat(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Free-form conversational reply."""
+        ...

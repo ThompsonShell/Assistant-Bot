@@ -39,3 +39,16 @@ class DeterministicProvider:
             ai_generated=False,
             notes=["AI planning is disabled; this is a simple rule-based extraction."],
         )
+
+    def chat(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        return (
+            "🤖 AI chat hali ulanmagan.\n\n"
+            "Claude bilan suhbatlashish uchun Claude Agent SDK (Pro obunangiz) "
+            "sozlanishi kerak. Buyruqlar esa ishlaydi: /today, /stats, /github, /repos."
+        )
