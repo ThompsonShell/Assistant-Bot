@@ -175,10 +175,13 @@ async function api(path, opts = {}) {
     opts.headers["Content-Type"] = "application/json";
   }
   const r = await fetch(path, opts);
-  if (r.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  if (r.status === 401) { showLogin(); throw new Error("Invalid username or password"); }
   if (!r.ok) {
     let d; try { d = await r.json(); } catch { d = {}; }
-    throw new Error(d.detail || ("Error " + r.status));
+    let msg = d.detail;
+    if (Array.isArray(msg)) msg = msg.map(x => x.msg || JSON.stringify(x)).join(", ");
+    else if (msg && typeof msg === "object") msg = JSON.stringify(msg);
+    throw new Error(msg || ("Error " + r.status));
   }
   return r.status === 204 ? null : r.json();
 }
