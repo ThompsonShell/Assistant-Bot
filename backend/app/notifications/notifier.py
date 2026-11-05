@@ -13,7 +13,10 @@ class Notifier:
     def __init__(self, channels: list[NotificationChannel]) -> None:
         self.channels = channels
 
-    def _dispatch(self, db: Session, category: str, title: str, body: str) -> None:
+    def _dispatch(
+        self, db: Session, category: str, title: str, body: str
+    ) -> list[dict]:
+        results: list[dict] = []
         for ch in self.channels:
             delivered, error = ch.send(title, body)
             db.add(
@@ -26,6 +29,14 @@ class Notifier:
                     error=error,
                 )
             )
+            results.append({"channel": ch.name, "delivered": delivered, "error": error})
+        return results
+
+    def notify(self, db: Session, category: str, title: str, body: str) -> list[dict]:
+        """Send an arbitrary notification and commit. Returns per-channel results."""
+        results = self._dispatch(db, category, title, body)
+        db.commit()
+        return results
 
     def notify_github_event(self, db: Session, event: GitHubEvent) -> None:
         title = f"GitHub · {event.actor_login} {event.title}"
