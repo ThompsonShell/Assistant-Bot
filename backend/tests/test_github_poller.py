@@ -1,3 +1,5 @@
+import datetime as dt
+
 from app.db import Base, make_engine, make_sessionmaker
 from app.integrations.github import poll_repo
 from app.models.github import GitHubEvent, GitHubRepo
@@ -82,9 +84,23 @@ def test_poll_ingests_commits():
     assert poll_repo(db, client, repo) == 0
 
 
+def test_first_poll_is_silent_baseline():
+    # Adding a repo backfills history WITHOUT notifications (no flood).
+    db = _session()
+    repo = _repo(db)  # last_polled_at is None -> first poll
+    notifier = Notifier([DashboardChannel()])
+    n = poll_repo(db, FakeGitHubClient(SAMPLE_EVENTS), repo, notifier)
+    assert n == 3  # events ARE stored
+    assert db.query(GitHubEvent).count() == 3
+    assert db.query(Notification).count() == 0  # but nothing was sent
+
+
 def test_poll_records_notifications():
     db = _session()
     repo = _repo(db)
+    # Simulate a repo that has already been baselined (not the first poll).
+    repo.last_polled_at = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)
+    db.commit()
     notifier = Notifier([DashboardChannel()])
     poll_repo(db, FakeGitHubClient(SAMPLE_EVENTS), repo, notifier)
     notes = db.query(Notification).all()

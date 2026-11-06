@@ -120,20 +120,28 @@ def poll_repo(
     repo: GitHubRepo,
     notifier: SupportsNotify | None = None,
 ) -> int:
-    """Poll one repository (events feed + commits). Returns NEW items stored."""
+    """Poll one repository (events feed + commits). Returns NEW items stored.
+
+    The FIRST poll of a repo (``last_polled_at is None``) backfills existing
+    history SILENTLY — no notifications — so adding a repo (or many via
+    watch-all) never floods you with its whole past. Only genuinely new events
+    seen on later polls trigger notifications.
+    """
+    first_poll = repo.last_polled_at is None
     repo.last_polled_at = _utcnow()
+    active_notifier = None if first_poll else notifier
     new_count = 0
 
     # 1) Events feed (pushes, PRs, issues, ...) — great for public repos.
     events, new_etag = client.repo_events(repo.full_name, repo.etag)
     if events is not None:  # None == 304 Not Modified
         repo.etag = new_etag
-        new_count += _ingest_events(db, repo, events, notifier)
+        new_count += _ingest_events(db, repo, events, active_notifier)
 
     # 2) Commits directly — reliable for private repos and has no feed delay.
     try:
         commits = client.repo_commits(repo.full_name)
-        new_count += _ingest_commits(db, repo, commits, notifier)
+        new_count += _ingest_commits(db, repo, commits, active_notifier)
     except Exception as exc:  # noqa: BLE001 - commits are best-effort
         logger.warning(
             "github commits fetch failed",
@@ -143,7 +151,7 @@ def poll_repo(
     db.commit()
     if new_count:
         logger.info(
-            "github poll stored items",
+            "github baseline stored (silent)" if first_poll else "github poll stored items",
             extra={"extra_fields": {"repo": repo.full_name, "new_items": new_count}},
         )
     return new_count

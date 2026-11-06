@@ -60,8 +60,9 @@ def test_poll_events_and_analytics(app, client):
     assert analytics["human_events"] == 1
     assert analytics["automation_events"] == 2
 
+    # First poll of a repo is a silent baseline — events stored, no notifications.
     notes = client.get("/github/notifications").json()
-    assert len(notes) == 3
+    assert len(notes) == 0
 
 
 def test_poll_without_token_errors(app, client):
