@@ -53,6 +53,26 @@ class GitHubClient:
         resp.raise_for_status()
         return resp.json()
 
+    def list_accessible_repos(
+        self, per_page: int = 100, max_pages: int = 20
+    ) -> list[dict[str, Any]]:
+        """List every repository the token can access (own + org, public +
+        private), most-recently-pushed first."""
+        repos: list[dict[str, Any]] = []
+        for page in range(1, max_pages + 1):
+            resp = self._http.get(
+                "/user/repos",
+                params={"per_page": per_page, "page": page, "sort": "pushed"},
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not isinstance(batch, list) or not batch:
+                break
+            repos.extend(batch)
+            if len(batch) < per_page:
+                break
+        return repos
+
 
 def make_github_client(token: str | None = None) -> GitHubClient:
     token = token or settings.github_token

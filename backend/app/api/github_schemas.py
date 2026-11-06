@@ -19,6 +19,18 @@ class RepoCreate(BaseModel):
         return v
 
 
+class WatchAllRequest(BaseModel):
+    # Optional: only watch repos whose owner matches (case-insensitive).
+    # Empty = watch every repository the token can access.
+    owner: str | None = Field(default=None, max_length=120)
+
+
+class WatchAllResult(BaseModel):
+    added: list[str]
+    already_watched: int
+    note: str = "Watches every accessible repo (or those of the given owner)."
+
+
 class RepoInfo(BaseModel):
     id: int
     full_name: str

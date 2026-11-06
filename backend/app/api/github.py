@@ -21,6 +21,8 @@ from .github_schemas import (
     PollResult,
     RepoCreate,
     RepoInfo,
+    WatchAllRequest,
+    WatchAllResult,
 )
 from .schemas import SimpleMessage
 
@@ -71,6 +73,57 @@ def add_repo(
         detail={"full_name": full_name},
     )
     return repo
+
+
+@router.post("/repos/watch-all", response_model=WatchAllResult)
+def watch_all(
+    body: WatchAllRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_csrf),
+) -> WatchAllResult:
+    """Watch every repository the token can access (optionally one owner)."""
+    client = _client(request)
+    owner_filter = (body.owner or "").strip().lower()
+    try:
+        repos = client.list_accessible_repos()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Could not list your repositories. GITHUB_TOKEN must be a "
+                "fine-grained Personal Access Token (or classic PAT) with read "
+                "access to your repos. Add repos one by one with /github/repos "
+                "if needed. (" + str(exc)[:120] + ")"
+            ),
+        )
+
+    existing = {row[0] for row in db.query(GitHubRepo.full_name).all()}
+    added: list[str] = []
+    skipped = 0
+    for r in repos:
+        owner = (r.get("owner") or {}).get("login") or ""
+        name = r.get("name") or ""
+        if not owner or not name:
+            continue
+        if owner_filter and owner.lower() != owner_filter:
+            continue
+        full = f"{owner}/{name}"
+        if full in existing:
+            skipped += 1
+            continue
+        db.add(GitHubRepo(owner=owner, name=name, full_name=full, active=True))
+        existing.add(full)
+        added.append(full)
+    db.commit()
+    record_audit(
+        db,
+        action="github.repos.watch_all",
+        category="github",
+        detail={"added": len(added), "owner": owner_filter or "all"},
+    )
+    return WatchAllResult(added=sorted(added), already_watched=skipped)
 
 
 @router.delete("/repos/{repo_id}", response_model=SimpleMessage)

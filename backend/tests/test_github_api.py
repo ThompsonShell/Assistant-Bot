@@ -72,6 +72,36 @@ def test_poll_without_token_errors(app, client):
     assert client.post("/github/poll", headers=headers).status_code == 400
 
 
+def test_watch_all(app, client):
+    headers = _auth(client)
+    app.state.github_client = FakeGitHubClient(
+        [],
+        accessible=[
+            {"owner": {"login": "me"}, "name": "a", "private": False},
+            {"owner": {"login": "me"}, "name": "b", "private": True},
+            {"owner": {"login": "other"}, "name": "c", "private": False},
+        ],
+    )
+    r = client.post("/github/repos/watch-all", json={}, headers=headers)
+    assert r.status_code == 200
+    assert set(r.json()["added"]) == {"me/a", "me/b", "other/c"}
+
+    # Idempotent: a second call adds nothing.
+    r2 = client.post("/github/repos/watch-all", json={}, headers=headers)
+    assert r2.json()["added"] == [] and r2.json()["already_watched"] == 3
+
+    # Filter by owner.
+    app.state.github_client = FakeGitHubClient(
+        [],
+        accessible=[
+            {"owner": {"login": "me"}, "name": "d", "private": False},
+            {"owner": {"login": "x"}, "name": "e", "private": False},
+        ],
+    )
+    r3 = client.post("/github/repos/watch-all", json={"owner": "me"}, headers=headers)
+    assert r3.json()["added"] == ["me/d"]
+
+
 def test_analytics_bad_range(client):
     _auth(client)
     assert client.get("/github/analytics", params={"range": "decade"}).status_code == 400
