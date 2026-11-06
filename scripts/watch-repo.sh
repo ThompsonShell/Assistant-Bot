@@ -10,6 +10,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1090
 set -a; source "$ROOT/.env"; set +a
 BASE="${BASE_URL:-http://localhost:8000}"
+# shellcheck disable=SC1090
+source "$(dirname "$0")/_lib.sh"
 
 if [ $# -lt 2 ]; then
   echo "Usage: $0 <owner> <repo>"
@@ -17,13 +19,8 @@ if [ $# -lt 2 ]; then
 fi
 OWNER="$1"; NAME="$2"
 
-JAR="$(mktemp)"; trap 'rm -f "$JAR"' EXIT
-CSRF="$(
-  curl -s -c "$JAR" -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
-    -d "{\"username\":\"${ADMIN_USERNAME:-admin}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('csrf_token',''))"
-)"
-[ -z "$CSRF" ] && { echo "Login failed — check ADMIN_PASSWORD and that the app is running."; exit 1; }
+lifeos_require_app
+lifeos_login
 
 echo "==> Watching $OWNER/$NAME"
 curl -s -b "$JAR" -X POST "$BASE/github/repos" \

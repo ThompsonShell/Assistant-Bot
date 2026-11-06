@@ -10,23 +10,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1090
 set -a; source "$ROOT/.env"; set +a
-
 BASE="${BASE_URL:-http://localhost:8000}"
-JAR="$(mktemp)"
-trap 'rm -f "$JAR"' EXIT
+# shellcheck disable=SC1090
+source "$(dirname "$0")/_lib.sh"
 
-echo "==> Logging in as ${ADMIN_USERNAME:-admin}"
-CSRF="$(
-  curl -s -c "$JAR" -X POST "$BASE/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"username\":\"${ADMIN_USERNAME:-admin}\",\"password\":\"${ADMIN_PASSWORD}\"}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin).get('csrf_token',''))" 2>/dev/null || true
-)"
-
-if [ -z "$CSRF" ]; then
-  echo "    Login failed. Check ADMIN_PASSWORD in your .env, and that the app is running."
-  exit 1
-fi
+lifeos_require_app
+lifeos_login
 
 echo "==> Sending test notification"
 curl -s -b "$JAR" -X POST "$BASE/notifications/test" -H "X-CSRF-Token: $CSRF" \
