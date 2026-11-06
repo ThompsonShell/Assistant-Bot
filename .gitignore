@@ -23,3 +23,6 @@ dist/
 build/
 node_modules/
 .DS_Store
+
+# Separate private project (its own repo)
+/tg-business-bot/
