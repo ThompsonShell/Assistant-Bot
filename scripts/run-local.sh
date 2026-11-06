@@ -54,7 +54,8 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=change-me-now
 DATABASE_URL=sqlite+pysqlite:///./lifeos.db
 REDIS_URL=redis://localhost:6379/0
-ENABLE_SCHEDULER=false
+ENABLE_SCHEDULER=true
+GITHUB_POLL_INTERVAL_SECONDS=30
 DISPLAY_TIMEZONE=Asia/Tashkent
 EOF
   echo "    Created $ROOT/.env"
