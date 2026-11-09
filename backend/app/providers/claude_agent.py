@@ -38,10 +38,13 @@ class ClaudeAgentProvider:
     name = "claude-cli"
     ai_available = True
 
+    _EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+
     def __init__(self) -> None:
         self._model = settings.claude_agent_model or "sonnet"
         self._token = settings.claude_code_oauth_token
         self._bin = _resolve_bin()
+        self._effort = settings.claude_effort if settings.claude_effort in self._EFFORTS else "medium"
 
     def _run(self, system: str, prompt: str, *, timeout: int = 120) -> str:
         # Child env: drop API-key/vars so the subscription login is used.
@@ -60,6 +63,7 @@ class ClaudeAgentProvider:
                 "--output-format", "json",
                 "--tools", "",
                 "--no-session-persistence",
+                "--effort", self._effort,
                 "--system-prompt-file", spf,
             ]
             if self._model:

@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     use_claude_subscription: bool = False
     claude_code_oauth_token: str | None = None
     claude_agent_model: str = "sonnet"
+    # Reasoning effort for the CLI provider: low | medium | high | xhigh | max.
+    # medium is a good balance for a chat/planner and uses less of your Pro limit.
+    claude_effort: str = "medium"
 
     @property
     def is_production(self) -> bool:
