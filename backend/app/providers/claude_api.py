@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from ..config import settings
-from .base import PlanResult
+from .base import PLAN_SYSTEM, PlanResult, parse_plan_response
 
 logger = logging.getLogger("lifeos.providers.claude_api")
 
@@ -61,9 +61,12 @@ class ClaudeApiProvider:
         return self._complete(f"Summarize briefly:\n\n{text}", max_tokens=300)
 
     def plan(self, instruction: str, *, context: dict | None = None) -> PlanResult:
-        text = self._complete(
-            "Turn this into a short, realistic task plan with time estimates:\n\n"
-            + instruction,
-            max_tokens=800,
-        )
-        return PlanResult(summary=text, tasks=[], ai_generated=True)
+        return self.plan_tasks(instruction, context=context)
+
+    def plan_tasks(self, instruction: str, *, context: dict | None = None) -> PlanResult:
+        try:
+            text = self._complete(instruction, system=PLAN_SYSTEM, max_tokens=2000)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("claude plan error", extra={"extra_fields": {"error": str(exc)[:200]}})
+            return PlanResult(summary=f"⚠️ Claude error: {str(exc)[:150]}", ai_generated=True)
+        return parse_plan_response(text)

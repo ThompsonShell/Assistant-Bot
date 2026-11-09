@@ -40,6 +40,21 @@ class DeterministicProvider:
             notes=["AI planning is disabled; this is a simple rule-based extraction."],
         )
 
+    def plan_tasks(self, instruction: str, *, context: dict[str, Any] | None = None) -> PlanResult:
+        raw = (instruction or "").replace("\n", ",")
+        items = [c.strip(" .;-") for c in raw.split(",") if c.strip()]
+        tasks = [
+            {"title": c, "day": None, "duration_minutes": None, "priority": "medium",
+             "category": None}
+            for c in items
+        ]
+        return PlanResult(
+            summary=f"Extracted {len(tasks)} task(s) (rule-based, no AI).",
+            tasks=tasks,
+            ai_generated=False,
+            notes=["AI planning is off — connect Claude (ANTHROPIC_API_KEY) for a real schedule."],
+        )
+
     def chat(
         self,
         prompt: str,

@@ -13,6 +13,8 @@ from sqlalchemy.orm import sessionmaker
 
 from . import __version__
 from .api import auth as auth_api
+from .api import calendar as calendar_api
+from .api import chat as chat_api
 from .api import github as github_api
 from .api import health as health_api
 from .api import notifications as notifications_api
@@ -154,6 +156,8 @@ def create_app(
     app.include_router(auth_api.router)
     app.include_router(github_api.router)
     app.include_router(notifications_api.router)
+    app.include_router(calendar_api.router)
+    app.include_router(chat_api.router)
     app.include_router(web_api.router)
 
     if start_scheduler:

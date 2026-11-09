@@ -17,7 +17,7 @@ import logging
 import os
 
 from ..config import settings
-from .base import PlanResult
+from .base import PLAN_SYSTEM, PlanResult, parse_plan_response
 
 logger = logging.getLogger("lifeos.providers.claude_agent")
 
@@ -89,7 +89,7 @@ class ClaudeAgentProvider:
         return self.chat(f"Summarize briefly:\n\n{text}")
 
     def plan(self, instruction: str, *, context: dict | None = None) -> PlanResult:
-        return PlanResult(
-            summary=self.chat(f"Make a short, realistic task plan from:\n\n{instruction}"),
-            ai_generated=True,
-        )
+        return self.plan_tasks(instruction, context=context)
+
+    def plan_tasks(self, instruction: str, *, context: dict | None = None) -> PlanResult:
+        return parse_plan_response(self.chat(instruction, system=PLAN_SYSTEM))
