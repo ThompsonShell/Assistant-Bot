@@ -31,6 +31,7 @@ HELP = (
     "/month — oylik statistika\n"
     "/github — oxirgi hodisalar\n"
     "/repos — kuzatilayotgan repolar\n"
+    "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
     "Oddiy matn yozsangiz — Claude javob beradi (ulangan bo'lsa)."
 )
@@ -101,9 +102,30 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _events_text(db)
     if low == "/repos":
         return _repos_text(db)
+    if low == "/effort" or low.startswith("/effort "):
+        return _effort_text(t)
     if t.startswith("/"):
         return "Noma'lum buyruq. /help ni bosing."
     return provider.chat(t, system=SYSTEM_PROMPT, history=history)
+
+
+def _effort_text(text: str) -> str:
+    """/effort — show or set Claude reasoning effort."""
+    from ..providers.runtime import VALID_EFFORTS, get_effort, set_effort
+
+    parts = text.split()
+    if len(parts) < 2:
+        return (
+            f"🧠 Hozirgi effort: *{get_effort()}*\n\n"
+            "O'zgartirish: /effort <low|medium|high|xhigh|max>\n"
+            "• medium — tez va tejamkor (tavsiya)\n"
+            "• high — chuqurroq, lekin sekinroq va obunadan ko'proq sarflaydi"
+        )
+    level = parts[1].lower()
+    if level not in VALID_EFFORTS:
+        return "Noto'g'ri daraja. /effort <low|medium|high|xhigh|max>"
+    set_effort(level)
+    return f"✅ Effort o'rnatildi: {level}"
 
 
 def process_update(http, session_local, provider, update: dict) -> None:

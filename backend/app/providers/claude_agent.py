@@ -58,12 +58,14 @@ class ClaudeAgentProvider:
         try:
             os.write(fd, (system or "").encode("utf-8"))
             os.close(fd)
+            from .runtime import get_effort  # owner can change this at runtime
+
             cmd = [
                 self._bin, "-p",
                 "--output-format", "json",
                 "--tools", "",
                 "--no-session-persistence",
-                "--effort", self._effort,
+                "--effort", get_effort(self._effort),
                 "--system-prompt-file", spf,
             ]
             if self._model:

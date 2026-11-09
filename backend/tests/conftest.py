@@ -19,6 +19,10 @@ os.environ["GITHUB_TOKEN"] = ""
 os.environ["ENABLE_SCHEDULER"] = "false"
 # Isolate tests from any ambient Claude credentials; force the deterministic provider.
 os.environ["ANTHROPIC_API_KEY"] = ""
+import tempfile  # noqa: E402
+os.environ.setdefault(
+    "RUNTIME_STATE_FILE", os.path.join(tempfile.gettempdir(), "lifeos_test_runtime.json")
+)
 os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = ""
 os.environ["USE_CLAUDE_SUBSCRIPTION"] = "false"
 os.environ["TELEGRAM_BOT_TOKEN"] = ""

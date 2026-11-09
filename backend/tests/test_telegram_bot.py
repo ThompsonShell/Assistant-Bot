@@ -72,6 +72,18 @@ def test_commands_with_data():
     assert "alice" in tb.handle_text(db, FakeProvider(), "/github")
 
 
+def test_effort_command():
+    from app.providers.runtime import get_effort
+
+    db = _sessionmaker()()
+    assert "effort" in tb.handle_text(db, FakeProvider(), "/effort").lower()
+    assert "high" in tb.handle_text(db, FakeProvider(), "/effort high")
+    assert get_effort() == "high"
+    assert "Noto'g'ri" in tb.handle_text(db, FakeProvider(), "/effort ultra")
+    tb.handle_text(db, FakeProvider(), "/effort medium")  # reset for other tests
+    assert get_effort() == "medium"
+
+
 def test_owner_only(monkeypatch):
     from app.config import settings
 
