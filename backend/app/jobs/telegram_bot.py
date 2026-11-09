@@ -65,11 +65,44 @@ def _api(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
-def send_message(http: httpx.Client, chat_id: Any, text: str) -> None:
+BOT_COMMANDS = [
+    {"command": "today", "description": "Bugungi GitHub faoliyati"},
+    {"command": "week", "description": "Haftalik statistika"},
+    {"command": "github", "description": "Oxirgi hodisalar"},
+    {"command": "repos", "description": "Kuzatilayotgan repolar"},
+    {"command": "plan", "description": "AI reja tuzish (saqlaydi)"},
+    {"command": "tasks", "description": "Vazifalar ro'yxati"},
+    {"command": "done", "description": "Vazifa bajarildi"},
+    {"command": "effort", "description": "Claude chuqurligi"},
+    {"command": "help", "description": "Yordam"},
+]
+
+# Persistent quick-tap buttons shown after /start.
+MAIN_KEYBOARD = {
+    "keyboard": [
+        [{"text": "/tasks"}, {"text": "/today"}],
+        [{"text": "/plan "}, {"text": "/help"}],
+    ],
+    "resize_keyboard": True,
+}
+
+
+def send_message(http: httpx.Client, chat_id: Any, text: str, reply_markup=None) -> None:
+    payload = {"chat_id": chat_id, "text": text[:4000]}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
-        http.post(_api("sendMessage"), json={"chat_id": chat_id, "text": text[:4000]})
+        http.post(_api("sendMessage"), json=payload)
     except Exception as exc:  # noqa: BLE001
         logger.warning("telegram send failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+
+
+def set_bot_commands(http: httpx.Client) -> None:
+    """Register the "/" menu of commands with Telegram."""
+    try:
+        http.post(_api("setMyCommands"), json={"commands": BOT_COMMANDS})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("setMyCommands failed", extra={"extra_fields": {"error": str(exc)[:200]}})
 
 
 def _summary_text(db, range_name: str) -> str:
@@ -237,7 +270,8 @@ def process_update(http, session_local, provider, update: dict) -> None:
 
     with session_local() as db:
         reply = handle_text(db, provider, text)
-    send_message(http, chat_id, reply)
+    markup = MAIN_KEYBOARD if text.strip().lower() in ("/start", "start") else None
+    send_message(http, chat_id, reply, reply_markup=markup)
 
 
 def run_bot(
@@ -253,6 +287,7 @@ def run_bot(
     http = http or httpx.Client(timeout=70)
     provider = provider or get_provider()
 
+    set_bot_commands(http)  # register the "/" command menu
     logger.info("telegram bot started (long-polling)")
     offset = None
     iterations = 0
