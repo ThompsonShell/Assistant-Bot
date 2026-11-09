@@ -30,6 +30,19 @@ def _parse_iso(value: str | None) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _is_empty_push(ev: dict) -> bool:
+    """A PushEvent that carries no commits (branch create/update ref, merge
+    fast-forward, or an otherwise empty push). It says nothing useful, so we
+    neither store nor notify it — that's the "pushed 0 commits" noise."""
+    if (ev.get("type") or "") != "PushEvent":
+        return False
+    payload = ev.get("payload") or {}
+    size = payload.get("size")
+    if size is None:
+        size = len(payload.get("commits") or [])
+    return not size
+
+
 def _existing_ids(db: Session, ids: list[str]) -> set[str]:
     if not ids:
         return set()
@@ -48,6 +61,8 @@ def _ingest_events(
         gh_id = str(ev.get("id"))
         if gh_id in existing:
             continue
+        if _is_empty_push(ev):
+            continue  # "pushed 0 commits" — pure noise, skip entirely
         s = summarize_event(ev)
         actor = ev.get("actor") or {}
         login = actor.get("login", "")

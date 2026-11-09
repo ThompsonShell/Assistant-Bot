@@ -95,6 +95,29 @@ def test_first_poll_is_silent_baseline():
     assert db.query(Notification).count() == 0  # but nothing was sent
 
 
+EMPTY_PUSH_EVENT = {
+    "id": "2001",
+    "type": "PushEvent",
+    "actor": {"login": "alice"},
+    "repo": {"name": "octo/demo"},
+    "created_at": "2026-01-06T10:00:00Z",
+    "payload": {"ref": "refs/heads/main", "size": 0, "commits": []},
+}
+
+
+def test_empty_push_is_skipped():
+    # "pushed 0 commits" is noise: not stored, not notified.
+    db = _session()
+    repo = _repo(db)
+    repo.last_polled_at = dt.datetime(2020, 1, 1, tzinfo=dt.timezone.utc)  # not first poll
+    db.commit()
+    notifier = Notifier([DashboardChannel()])
+    n = poll_repo(db, FakeGitHubClient([EMPTY_PUSH_EVENT], etag="Z"), repo, notifier)
+    assert n == 0
+    assert db.query(GitHubEvent).count() == 0
+    assert db.query(Notification).count() == 0
+
+
 def test_poll_records_notifications():
     db = _session()
     repo = _repo(db)
