@@ -1,95 +1,125 @@
-"""Claude via the Claude Agent SDK, authenticated with a Claude subscription.
+"""Claude via the Claude Code CLI (`claude -p`) using a subscription token.
 
-⚠️ POLICY NOTE: Anthropic's Agent SDK docs state that third-party products/agents
-should use API-key authentication, not a claude.ai (Pro/Max) subscription login.
-A private, single-user tool is a gray area the docs don't explicitly permit. Use
-this path at your own discretion; the ClaudeApiProvider (API key) is the
-fully-supported option. See README.
+Uses the installed ``claude`` binary through a subprocess — NOT the
+``claude-agent-sdk`` Python package, which drags in newer pydantic/starlette
+that conflict with this app's FastAPI stack. Auth comes from
+CLAUDE_CODE_OAUTH_TOKEN (``claude setup-token``) or a local ``claude`` login.
 
-Auth: either a local `claude` login on the machine, or CLAUDE_CODE_OAUTH_TOKEN
-(from `claude setup-token`) for headless/server use. ANTHROPIC_API_KEY is removed
-from the subprocess env so the subscription is used.
+⚠️ Policy note: Anthropic's docs say products/agents should use API-key auth,
+not a subscription login. A private, single-user tool is a gray area. The
+ClaudeApiProvider (ANTHROPIC_API_KEY) is the fully-supported option.
 """
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional
 
 from ..config import settings
 from .base import PLAN_SYSTEM, PlanResult, parse_plan_response
 
-logger = logging.getLogger("lifeos.providers.claude_agent")
+logger = logging.getLogger("lifeos.providers.claude_cli")
 
-_SCRATCH = "/tmp/lifeos-claude-scratch"
-# Built-in Claude Code tools we disable so the bot behaves as a plain chat model.
-_BUILTIN_TOOLS = [
-    "Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "Agent",
-]
+
+def _resolve_bin() -> str:
+    env_bin = os.environ.get("CLAUDE_BIN")
+    if env_bin:
+        return env_bin
+    found = shutil.which("claude")
+    return found or str(Path.home() / ".local" / "bin" / "claude")
 
 
 class ClaudeAgentProvider:
-    name = "claude-agent-sdk"
+    name = "claude-cli"
     ai_available = True
 
     def __init__(self) -> None:
-        self._model = settings.claude_agent_model
-        if settings.claude_code_oauth_token:
-            os.environ.setdefault(
-                "CLAUDE_CODE_OAUTH_TOKEN", settings.claude_code_oauth_token
-            )
+        self._model = settings.claude_agent_model or "sonnet"
+        self._token = settings.claude_code_oauth_token
+        self._bin = _resolve_bin()
 
-    async def _ask(self, prompt: str, system: str | None) -> str:
-        from claude_agent_sdk import (  # lazy import
-            ClaudeAgentOptions,
-            ResultMessage,
-            query,
-        )
+    def _run(self, system: str, prompt: str, *, timeout: int = 120) -> str:
+        # Child env: drop API-key/vars so the subscription login is used.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
+        env.pop("CLAUDE_CODE_SIMPLE", None)
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        if self._token:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = self._token
 
-        os.makedirs(_SCRATCH, exist_ok=True)
-        # Force subscription auth: an API key would take precedence otherwise.
-        os.environ.pop("ANTHROPIC_API_KEY", None)
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-        options = ClaudeAgentOptions(
-            system_prompt=system or "You are a helpful assistant.",
-            model=self._model,
-            tools=[],
-            disallowed_tools=_BUILTIN_TOOLS,
-            setting_sources=[],
-            max_turns=1,
-            cwd=_SCRATCH,
-        )
-        text: str | None = None
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, ResultMessage):
-                if getattr(message, "is_error", False):
-                    raise RuntimeError(f"Claude request failed: {message.subtype}")
-                text = message.result
-        if text is None:
-            raise RuntimeError("No result from Claude Code")
-        return text.strip()
+        fd, spf = tempfile.mkstemp(suffix=".txt")
+        try:
+            os.write(fd, (system or "").encode("utf-8"))
+            os.close(fd)
+            cmd = [
+                self._bin, "-p",
+                "--output-format", "json",
+                "--tools", "",
+                "--no-session-persistence",
+                "--system-prompt-file", spf,
+            ]
+            if self._model:
+                cmd += ["--model", self._model]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    input=(prompt or "").encode("utf-8"),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    timeout=timeout,
+                )
+            except FileNotFoundError:
+                raise RuntimeError(f"`claude` binary not found at {self._bin!r}")
+            out = proc.stdout.decode("utf-8", "replace")
+            last = ""
+            for line in out.splitlines():
+                if line.strip():
+                    last = line.strip()
+            data = json.loads(last) if last else None
+            if (
+                isinstance(data, dict)
+                and not data.get("is_error")
+                and data.get("subtype") in (None, "success")
+            ):
+                return (data.get("result") or "").strip()
+            detail = ""
+            if isinstance(data, dict):
+                detail = data.get("result") or ""
+            if not detail:
+                detail = proc.stderr.decode("utf-8", "replace")[:200] or "claude failed"
+            raise RuntimeError(detail)
+        finally:
+            try:
+                os.unlink(spf)
+            except OSError:
+                pass
 
     def chat(
-        self, prompt: str, *, system: str | None = None, history: list[dict] | None = None
+        self, prompt: str, *, system: Optional[str] = None, history: Optional[list] = None
     ) -> str:
         full = prompt
         if history:
             ctx = "\n".join(f"{h['role']}: {h['content']}" for h in history[-6:])
             full = f"Conversation so far:\n{ctx}\n\nUser: {prompt}"
         try:
-            return asyncio.run(self._ask(full, system))
+            return self._run(system or "You are a helpful assistant.", full)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "claude agent error", extra={"extra_fields": {"error": str(exc)[:200]}}
-            )
-            return f"⚠️ Claude (obuna) xatosi: {str(exc)[:150]}"
+            logger.warning("claude cli error", extra={"extra_fields": {"error": str(exc)[:200]}})
+            return f"⚠️ Claude (obuna) xatosi: {str(exc)[:160]}"
 
-    def summarize(self, text: str, *, context: dict | None = None) -> str:
+    def summarize(self, text: str, *, context: Optional[dict] = None) -> str:
         return self.chat(f"Summarize briefly:\n\n{text}")
 
-    def plan(self, instruction: str, *, context: dict | None = None) -> PlanResult:
+    def plan(self, instruction: str, *, context: Optional[dict] = None) -> PlanResult:
         return self.plan_tasks(instruction, context=context)
 
-    def plan_tasks(self, instruction: str, *, context: dict | None = None) -> PlanResult:
-        return parse_plan_response(self.chat(instruction, system=PLAN_SYSTEM))
+    def plan_tasks(self, instruction: str, *, context: Optional[dict] = None) -> PlanResult:
+        try:
+            return parse_plan_response(self._run(PLAN_SYSTEM, instruction, timeout=180))
+        except Exception as exc:  # noqa: BLE001
+            return PlanResult(summary=f"⚠️ Claude error: {str(exc)[:150]}", ai_generated=True)

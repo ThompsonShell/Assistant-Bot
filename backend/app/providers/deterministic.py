@@ -64,6 +64,7 @@ class DeterministicProvider:
     ) -> str:
         return (
             "🤖 AI chat hali ulanmagan.\n\n"
-            "Claude bilan suhbatlashish uchun Claude Agent SDK (Pro obunangiz) "
-            "sozlanishi kerak. Buyruqlar esa ishlaydi: /today, /stats, /github, /repos."
+            "Claude bilan suhbatlashish uchun ANTHROPIC_API_KEY yoki Pro obunangiz "
+            "(USE_CLAUDE_SUBSCRIPTION=true + CLAUDE_CODE_OAUTH_TOKEN) sozlanishi kerak. "
+            "Buyruqlar esa ishlaydi: /today, /stats, /github, /repos."
         )

@@ -25,11 +25,8 @@ print("CLAUDE_CODE_OAUTH_TOKEN set:", bool(tok),
 print("anthropic_model            :", settings.anthropic_model)
 print("claude_agent_model         :", settings.claude_agent_model)
 
-try:
-    import claude_agent_sdk  # noqa: F401
-    print("claude-agent-sdk installed : yes")
-except Exception as exc:  # noqa: BLE001
-    print("claude-agent-sdk installed : NO  ->", str(exc)[:90])
+import shutil
+print("claude binary found        :", shutil.which("claude") or "NO (install Claude Code)")
 
 p = _build_provider()
 print()
@@ -44,7 +41,7 @@ if p.name == "deterministic":
     print("    then restart the app.")
 else:
     print()
-    print(">>> Testing a tiny Claude call...")
+    print(">>> Testing a tiny Claude call (" + p.name + ")...")
     try:
         reply = p.chat("Reply with exactly: OK")
         print("Reply:", reply[:160])
