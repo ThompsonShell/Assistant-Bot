@@ -27,7 +27,7 @@ def test_selects_agent_with_subscription(monkeypatch):
     monkeypatch.setattr(settings, "anthropic_api_key", None)
     monkeypatch.setattr(settings, "use_claude_subscription", True)
     p = _build_provider()
-    assert p.name == "claude-agent-sdk"
+    assert p.name == "claude-cli"
 
 
 def test_deterministic_chat_message():
