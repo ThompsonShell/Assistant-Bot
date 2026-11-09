@@ -9,6 +9,7 @@ Also started as a daemon thread by the app factory when a token + chat id are se
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import time
 from typing import Any
@@ -19,7 +20,21 @@ from ..analytics import compute_range, github_summary
 from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
+from ..models.task import Task
 from ..providers import get_provider
+
+_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _week_start() -> dt.date:
+    today = dt.date.today()
+    return today - dt.timedelta(days=today.weekday())
+
+
+def _date_for_day(day: Any, week_start: dt.date):
+    if isinstance(day, str) and day.lower() in _DAYS:
+        return week_start + dt.timedelta(days=_DAYS.index(day.lower()))
+    return None
 
 logger = logging.getLogger("lifeos.telegram")
 
@@ -31,6 +46,9 @@ HELP = (
     "/month — oylik statistika\n"
     "/github — oxirgi hodisalar\n"
     "/repos — kuzatilayotgan repolar\n"
+    "📅 /plan <matn> — AI reja tuzadi va saqlaydi\n"
+    "📅 /tasks — vazifalar ro'yxati\n"
+    "📅 /done <raqam> — bajarildi deb belgilash\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
     "Oddiy matn yozsangiz — Claude javob beradi (ulangan bo'lsa)."
@@ -104,9 +122,83 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _repos_text(db)
     if low == "/effort" or low.startswith("/effort "):
         return _effort_text(t)
+    if low == "/tasks":
+        return _tasks_text(db)
+    if low.startswith("/plan"):
+        plan_text = t[len("/plan"):].strip()
+        if not plan_text:
+            return "Reja matnini yozing: /plan bu hafta backend, ingliz tili, dashboard..."
+        return _plan_and_save(db, provider, plan_text)
+    if low.startswith("/done"):
+        return _mark_done(db, t)
     if t.startswith("/"):
         return "Noma'lum buyruq. /help ni bosing."
     return provider.chat(t, system=SYSTEM_PROMPT, history=history)
+
+
+def _plan_and_save(db, provider, text: str) -> str:
+    result = provider.plan_tasks(text)
+    if not result.tasks:
+        return result.summary or "Vazifa topilmadi."
+    week = _week_start()
+    saved = []
+    for item in result.tasks:
+        task = Task(
+            title=item.get("title", "Task"),
+            scheduled_date=_date_for_day(item.get("day"), week),
+            duration_minutes=item.get("duration_minutes"),
+            priority=item.get("priority") or "medium",
+            category=item.get("category"),
+            source="ai",
+        )
+        db.add(task)
+        saved.append(task)
+    db.commit()
+    for t in saved:
+        db.refresh(t)
+    lines = [f"📅 {result.summary}".strip(), ""]
+    for t in saved:
+        when = t.scheduled_date.strftime("%a %d-%b") if t.scheduled_date else "kunsiz"
+        dur = f", {t.duration_minutes} min" if t.duration_minutes else ""
+        lines.append(f"#{t.id} {t.title} ({when}{dur})")
+    if result.notes:
+        lines.append("\n❓ " + " ".join(result.notes))
+    lines.append("\n✅ Saqlandi. /tasks — ko'rish, /done <raqam> — bajarildi.")
+    return "\n".join(lines)
+
+
+def _tasks_text(db) -> str:
+    today = dt.date.today()
+    tasks = (
+        db.query(Task)
+        .filter(Task.status != "done")
+        .filter((Task.scheduled_date >= today) | (Task.scheduled_date.is_(None)))
+        .order_by(Task.scheduled_date.is_(None), Task.scheduled_date)
+        .limit(20)
+        .all()
+    )
+    if not tasks:
+        return "Vazifa yo'q. /plan bilan reja tuzing."
+    lines = ["📋 Vazifalar:"]
+    for t in tasks:
+        when = t.scheduled_date.strftime("%a %d-%b") if t.scheduled_date else "kunsiz"
+        lines.append(f"▫️ #{t.id} {t.title} ({when})")
+    lines.append("\n/done <raqam> — bajarildi deb belgilash.")
+    return "\n".join(lines)
+
+
+def _mark_done(db, text: str) -> str:
+    parts = text.split()
+    if len(parts) < 2 or not parts[1].lstrip("#").isdigit():
+        return "Foydalanish: /done <raqam>  (masalan: /done 3)"
+    tid = int(parts[1].lstrip("#"))
+    task = db.get(Task, tid)
+    if task is None:
+        return f"#{tid} topilmadi."
+    task.status = "done"
+    task.completed_at = dt.datetime.now(dt.timezone.utc)
+    db.commit()
+    return f"✅ Bajarildi: {task.title}"
 
 
 def _effort_text(text: str) -> str:

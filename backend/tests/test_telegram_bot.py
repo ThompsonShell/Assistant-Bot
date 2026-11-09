@@ -17,6 +17,18 @@ class FakeProvider:
     def plan(self, *a, **k):
         return None
 
+    def plan_tasks(self, instruction, *, context=None):
+        from app.providers.base import PlanResult
+
+        return PlanResult(
+            summary="Haftalik reja",
+            tasks=[
+                {"title": "Backend", "day": "Monday", "duration_minutes": 90, "priority": "high", "category": None},
+                {"title": "English", "day": "Tuesday", "duration_minutes": 45, "priority": "medium", "category": None},
+            ],
+            ai_generated=True,
+        )
+
 
 def _sessionmaker():
     engine = make_engine("sqlite+pysqlite:///:memory:")
@@ -82,6 +94,24 @@ def test_effort_command():
     assert "Noto'g'ri" in tb.handle_text(db, FakeProvider(), "/effort ultra")
     tb.handle_text(db, FakeProvider(), "/effort medium")  # reset for other tests
     assert get_effort() == "medium"
+
+
+def test_plan_tasks_done_commands():
+    from app.models.task import Task
+
+    sm = _sessionmaker()
+    db = sm()
+    out = tb.handle_text(db, FakeProvider(), "/plan bu hafta backend va ingliz tili")
+    assert "Backend" in out and "Saqlandi" in out
+    assert db.query(Task).count() == 2
+
+    assert "Backend" in tb.handle_text(db, FakeProvider(), "/tasks")
+
+    tid = db.query(Task).filter(Task.title == "Backend").one().id
+    assert "Bajarildi" in tb.handle_text(db, FakeProvider(), f"/done {tid}")
+    assert db.get(Task, tid).status == "done"
+    # Done tasks drop out of /tasks.
+    assert "Backend" not in tb.handle_text(db, FakeProvider(), "/tasks")
 
 
 def test_owner_only(monkeypatch):
