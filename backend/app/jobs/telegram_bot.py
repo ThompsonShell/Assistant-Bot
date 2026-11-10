@@ -27,11 +27,17 @@ _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "su
 
 
 def _week_start() -> dt.date:
+    """Return the Monday of the current week (used as the anchor for plans)."""
     today = dt.date.today()
     return today - dt.timedelta(days=today.weekday())
 
 
 def _date_for_day(day: Any, week_start: dt.date):
+    """Map a weekday name (e.g. "Monday") to its date in the given week.
+
+    Returns None when ``day`` is missing or not a recognized weekday, so a
+    task without a specific day stays unscheduled.
+    """
     if isinstance(day, str) and day.lower() in _DAYS:
         return week_start + dt.timedelta(days=_DAYS.index(day.lower()))
     return None
@@ -62,6 +68,7 @@ SYSTEM_PROMPT = (
 
 
 def _api(method: str) -> str:
+    """Build the full Telegram Bot API URL for a given method."""
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
@@ -88,6 +95,11 @@ MAIN_KEYBOARD = {
 
 
 def send_message(http: httpx.Client, chat_id: Any, text: str, reply_markup=None) -> None:
+    """Send a message to a chat, truncating to Telegram's limit.
+
+    Failures are logged and swallowed so a transient send error never crashes
+    the polling loop. ``reply_markup`` optionally attaches a keyboard.
+    """
     payload = {"chat_id": chat_id, "text": text[:4000]}
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
@@ -106,6 +118,7 @@ def set_bot_commands(http: httpx.Client) -> None:
 
 
 def _summary_text(db, range_name: str) -> str:
+    """Format the GitHub activity summary for a named range (today/week/month)."""
     start, end = compute_range(range_name, settings.display_timezone)
     a = github_summary(db, start, end)
     return (
@@ -119,6 +132,7 @@ def _summary_text(db, range_name: str) -> str:
 
 
 def _events_text(db, limit: int = 8) -> str:
+    """Format the most recent GitHub events (newest first) as a chat message."""
     events = (
         db.query(GitHubEvent).order_by(GitHubEvent.created_at.desc()).limit(limit).all()
     )
@@ -131,6 +145,7 @@ def _events_text(db, limit: int = 8) -> str:
 
 
 def _repos_text(db) -> str:
+    """Format the list of watched repositories as a chat message."""
     repos = db.query(GitHubRepo).order_by(GitHubRepo.full_name).all()
     if not repos:
         return "Kuzatilayotgan repo yo'q."
@@ -170,6 +185,8 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
 
 
 def _plan_and_save(db, provider, text: str) -> str:
+    """Ask the AI provider to plan tasks from free text, persist them, and
+    return a confirmation listing each saved task with its day and duration."""
     result = provider.plan_tasks(text)
     if not result.tasks:
         return result.summary or "Vazifa topilmadi."
@@ -201,11 +218,16 @@ def _plan_and_save(db, provider, text: str) -> str:
 
 
 def _tasks_text(db) -> str:
+    """List every open (not-done) task as a message.
+
+    Overdue tasks are kept — an unfinished task scheduled earlier must not
+    silently vanish once its day has passed; it is marked ``⚠️ kechikdi``.
+    Dated tasks come first (earliest first), then undated ones.
+    """
     today = dt.date.today()
     tasks = (
         db.query(Task)
         .filter(Task.status != "done")
-        .filter((Task.scheduled_date >= today) | (Task.scheduled_date.is_(None)))
         .order_by(Task.scheduled_date.is_(None), Task.scheduled_date)
         .limit(20)
         .all()
@@ -215,12 +237,18 @@ def _tasks_text(db) -> str:
     lines = ["📋 Vazifalar:"]
     for t in tasks:
         when = t.scheduled_date.strftime("%a %d-%b") if t.scheduled_date else "kunsiz"
-        lines.append(f"▫️ #{t.id} {t.title} ({when})")
+        overdue = " ⚠️ kechikdi" if t.scheduled_date and t.scheduled_date < today else ""
+        lines.append(f"▫️ #{t.id} {t.title} ({when}){overdue}")
     lines.append("\n/done <raqam> — bajarildi deb belgilash.")
     return "\n".join(lines)
 
 
 def _mark_done(db, text: str) -> str:
+    """Mark the task from a "/done <id>" command as completed.
+
+    Returns a usage hint for a malformed command or a not-found message when
+    no task matches the id.
+    """
     parts = text.split()
     if len(parts) < 2 or not parts[1].lstrip("#").isdigit():
         return "Foydalanish: /done <raqam>  (masalan: /done 3)"
@@ -254,6 +282,8 @@ def _effort_text(text: str) -> str:
 
 
 def process_update(http, session_local, provider, update: dict) -> None:
+    """Handle one Telegram update: reject non-owner chats, route the text
+    through :func:`handle_text`, and reply (with the main keyboard on /start)."""
     msg = update.get("message") or update.get("edited_message") or {}
     chat = msg.get("chat") or {}
     chat_id = chat.get("id")
@@ -277,6 +307,11 @@ def process_update(http, session_local, provider, update: dict) -> None:
 def run_bot(
     *, session_local=None, http=None, provider=None, max_iterations: int | None = None
 ) -> None:
+    """Run the long-polling loop: fetch updates and process them one by one.
+
+    No-ops when the token or chat id is unset. ``max_iterations`` bounds the
+    loop for tests; in production it runs forever, keeping alive through errors.
+    """
     if not (settings.telegram_bot_token and settings.telegram_chat_id):
         logger.info("telegram bot disabled: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set")
         return
@@ -306,6 +341,7 @@ def run_bot(
 
 
 def _main() -> None:
+    """Entry point for running the bot standalone (``python -m ...``)."""
     from ..logging_config import configure_logging
 
     configure_logging(settings.log_level)
