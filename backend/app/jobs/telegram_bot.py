@@ -55,6 +55,7 @@ HELP = (
     "📅 /plan <matn> — AI reja tuzadi va saqlaydi\n"
     "📅 /tasks — vazifalar ro'yxati\n"
     "📅 /done <raqam> — bajarildi deb belgilash\n"
+    "📋 /jira — menga tayinlangan Jira issue'lar\n"
     "🌤 /weather — ob-havo va nima kiyish tavsiyasi\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
@@ -81,6 +82,7 @@ BOT_COMMANDS = [
     {"command": "plan", "description": "AI reja tuzish (saqlaydi)"},
     {"command": "tasks", "description": "Vazifalar ro'yxati"},
     {"command": "done", "description": "Vazifa bajarildi"},
+    {"command": "jira", "description": "Menga tayinlangan Jira issue'lar"},
     {"command": "weather", "description": "Ob-havo va kiyim tavsiyasi"},
     {"command": "effort", "description": "Claude chuqurligi"},
     {"command": "help", "description": "Yordam"},
@@ -197,6 +199,8 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _events_text(db)
     if low == "/repos":
         return _repos_text(db)
+    if low == "/jira":
+        return _jira_text()
     if low in ("/weather", "/obhavo", "/ob-havo"):
         return _weather_text()
     if low == "/effort" or low.startswith("/effort "):
@@ -291,6 +295,31 @@ def _mark_done(db, text: str) -> str:
     task.completed_at = dt.datetime.now(dt.timezone.utc)
     db.commit()
     return f"✅ Bajarildi: {task.title}"
+
+
+def _jira_text() -> str:
+    """/jira — list the Jira issues assigned to the owner (read-only).
+
+    Guides the user to configure credentials when Jira isn't set up, and
+    reports network/auth errors as a friendly message instead of crashing.
+    """
+    from ..integrations.jira import fetch_my_issues, format_issues, is_configured
+
+    if not is_configured():
+        return (
+            "📋 Jira hali ulanmagan.\n\n"
+            ".env'ga qo'shing:\n"
+            "JIRA_BASE_URL=https://sayt.atlassian.net\n"
+            "JIRA_EMAIL=email@example.com\n"
+            "JIRA_API_TOKEN=<token>\n\n"
+            "Token: id.atlassian.com/manage-profile/security/api-tokens"
+        )
+    try:
+        issues = fetch_my_issues()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("jira fetch failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+        return "📋 Jira ma'lumotini olib bo'lmadi. Token yoki URL ni tekshiring."
+    return format_issues(issues)
 
 
 def _weather_text() -> str:

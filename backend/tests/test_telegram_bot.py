@@ -175,6 +175,51 @@ def test_weather_command_handles_failure(monkeypatch):
     assert "olib bo'lmadi" in out
 
 
+def test_jira_command_not_configured(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "jira_base_url", None)
+    monkeypatch.setattr(settings, "jira_email", None)
+    monkeypatch.setattr(settings, "jira_api_token", None)
+    db = _sessionmaker()()
+    out = tb.handle_text(db, FakeProvider(), "/jira")
+    assert "ulanmagan" in out and "JIRA_BASE_URL" in out
+
+
+def test_jira_command_lists_issues(monkeypatch):
+    from app.config import settings
+    from app.integrations.jira import JiraIssue
+
+    monkeypatch.setattr(settings, "jira_base_url", "https://x.atlassian.net")
+    monkeypatch.setattr(settings, "jira_email", "a@b.com")
+    monkeypatch.setattr(settings, "jira_api_token", "t")
+    issues = [JiraIssue(
+        key="PROJ-7", summary="Ship it", status="To Do", status_category="new",
+        due="2099-05-01", priority="Medium", url="https://x.atlassian.net/browse/PROJ-7",
+    )]
+    monkeypatch.setattr("app.integrations.jira.fetch_my_issues", lambda *a, **k: issues)
+
+    db = _sessionmaker()()
+    out = tb.handle_text(db, FakeProvider(), "/jira")
+    assert "PROJ-7" in out and "Ship it" in out
+
+
+def test_jira_command_handles_error(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "jira_base_url", "https://x.atlassian.net")
+    monkeypatch.setattr(settings, "jira_email", "a@b.com")
+    monkeypatch.setattr(settings, "jira_api_token", "t")
+
+    def boom(*a, **k):
+        raise RuntimeError("401")
+
+    monkeypatch.setattr("app.integrations.jira.fetch_my_issues", boom)
+    db = _sessionmaker()()
+    out = tb.handle_text(db, FakeProvider(), "/jira")
+    assert "olib bo'lmadi" in out
+
+
 def test_owner_only(monkeypatch):
     from app.config import settings
 

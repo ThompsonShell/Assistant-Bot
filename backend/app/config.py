@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     morning_brief_hour: int = 8       # local hour (display_timezone)
     morning_brief_minute: int = 0
 
+    # Jira Cloud (read-only). Shows issues assigned to you via /jira.
+    # Create an API token at id.atlassian.com/manage-profile/security/api-tokens
+    jira_base_url: str | None = None      # e.g. https://yoursite.atlassian.net
+    jira_email: str | None = None         # your Atlassian account email
+    jira_api_token: str | None = None     # API token (secret — keep in .env)
+
     # GitHub monitoring (read-only)
     github_token: str | None = None
     github_api_base: str = "https://api.github.com"
