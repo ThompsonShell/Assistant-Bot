@@ -14,9 +14,32 @@ from sqlalchemy.orm import Session
 from ..models.github import GitHubEvent
 
 
+def _counts(events: list[GitHubEvent]) -> dict:
+    """Core activity counts for a list of events (commits / PRs / issues / ...)."""
+    by_type: Counter[str] = Counter(e.type for e in events)
+    return {
+        "total_events": len(events),
+        "commits": by_type.get("Commit", 0),
+        "pushes": by_type.get("PushEvent", 0),
+        "pull_requests": by_type.get("PullRequestEvent", 0),
+        "pull_request_reviews": by_type.get("PullRequestReviewEvent", 0),
+        "issues": by_type.get("IssuesEvent", 0),
+        "issue_comments": by_type.get("IssueCommentEvent", 0),
+    }
+
+
 def github_summary(
-    db: Session, start: dt.datetime, end: dt.datetime
+    db: Session,
+    start: dt.datetime,
+    end: dt.datetime,
+    owner_login: str | None = None,
 ) -> dict:
+    """Summarize stored GitHub activity in a time range.
+
+    When ``owner_login`` is given, the result also carries a ``mine`` block
+    with just that user's own actions, so callers can show "my activity"
+    alongside the overall activity across every watched repo.
+    """
     events = (
         db.query(GitHubEvent)
         .filter(GitHubEvent.created_at >= start, GitHubEvent.created_at < end)
@@ -30,8 +53,16 @@ def github_summary(
     by_day: Counter[str] = Counter(e.created_at.date().isoformat() for e in events)
     by_hour: Counter[int] = Counter(e.created_at.hour for e in events)
 
+    mine = None
+    if owner_login:
+        key = owner_login.lower()
+        my_events = [e for e in events if (e.actor_login or "").lower() == key]
+        mine = _counts(my_events)
+
     return {
         "range": {"start": start.isoformat(), "end": end.isoformat()},
+        "owner_login": owner_login,
+        "mine": mine,
         "total_events": len(events),
         "commits": by_type.get("Commit", 0),
         "pushes": by_type.get("PushEvent", 0),

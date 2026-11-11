@@ -67,6 +67,42 @@ def test_free_text_routes_to_provider():
     assert tb.handle_text(db, FakeProvider(), "salom") == "ECHO: salom"
 
 
+def test_today_splits_mine_and_overall(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "github_owner_login", "asilbek")
+    sm = _sessionmaker()
+    db = sm()
+    now = dt.datetime.now(dt.timezone.utc)
+    # One event by me, one by someone else — same watched repo.
+    db.add(GitHubEvent(
+        gh_id="m1", repo_full_name="o/r", type="PullRequestEvent", actor_login="asilbek",
+        actor_type="human", title="opened pr", created_at=now, ingested_at=now,
+    ))
+    db.add(GitHubEvent(
+        gh_id="o1", repo_full_name="o/r", type="PullRequestEvent", actor_login="someone",
+        actor_type="human", title="opened pr", created_at=now, ingested_at=now,
+    ))
+    db.commit()
+
+    out = tb.handle_text(db, FakeProvider(), "/today")
+    assert "Mening harakatlarim" in out and "asilbek" in out
+    assert "Umumiy" in out
+    # Mine: 1 PR; overall: 2 events.
+    assert "PR: 1" in out
+    assert "Hodisalar: 2" in out
+
+
+def test_summary_hint_without_owner_login(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "github_owner_login", None)
+    db = _sessionmaker()()
+    out = tb.handle_text(db, FakeProvider(), "/today")
+    assert "Umumiy" in out
+    assert "GITHUB_OWNER_LOGIN" in out  # hint to enable the personal split
+
+
 def test_commands_with_data():
     sm = _sessionmaker()
     db = sm()

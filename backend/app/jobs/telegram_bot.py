@@ -120,17 +120,44 @@ def set_bot_commands(http: httpx.Client) -> None:
 
 
 def _summary_text(db, range_name: str) -> str:
-    """Format the GitHub activity summary for a named range (today/week/month)."""
+    """Format the GitHub activity summary for a named range (today/week/month).
+
+    Shows the owner's own actions first (when ``github_owner_login`` is set),
+    then the overall activity across every watched repo — activity the owner
+    is involved in but that isn't only theirs.
+    """
     start, end = compute_range(range_name, settings.display_timezone)
-    a = github_summary(db, start, end)
-    return (
-        f"📊 {range_name.capitalize()} ({settings.display_timezone})\n"
-        f"Commits: {a['commits']}\n"
-        f"Hodisalar: {a['total_events']}\n"
-        f"Pull requests: {a['pull_requests']}\n"
-        f"Issues: {a['issues']}\n"
-        f"👤 Odam: {a['human_events']} · 🤖 Avtomatika: {a['automation_events']}"
-    )
+    a = github_summary(db, start, end, settings.github_owner_login)
+
+    lines = [f"📊 {range_name.capitalize()} ({settings.display_timezone})"]
+
+    mine = a.get("mine")
+    if mine is not None:
+        lines += [
+            "",
+            f"👤 *Mening harakatlarim* (@{a['owner_login']}):",
+            f"Commits: {mine['commits']} · PR: {mine['pull_requests']} · "
+            f"Issues: {mine['issues']} · Jami: {mine['total_events']}",
+        ]
+
+    lines += [
+        "",
+        "🌐 *Umumiy* (barcha repolar):",
+        f"Commits: {a['commits']}",
+        f"Hodisalar: {a['total_events']}",
+        f"Pull requests: {a['pull_requests']}",
+        f"Issues: {a['issues']}",
+        f"👤 Odam: {a['human_events']} · 🤖 Avtomatika: {a['automation_events']}",
+    ]
+
+    if mine is None:
+        lines += [
+            "",
+            "ℹ️ Shaxsiy harakatlaringizni ajratish uchun .env'da "
+            "GITHUB_OWNER_LOGIN ni yozing.",
+        ]
+
+    return "\n".join(lines)
 
 
 def _events_text(db, limit: int = 8) -> str:

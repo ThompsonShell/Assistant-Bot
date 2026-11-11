@@ -173,7 +173,7 @@ def analytics(
             detail=f"range must be one of {', '.join(VALID_RANGES)}",
         )
     start, end = compute_range(range, settings.display_timezone)
-    data = github_summary(db, start, end)
+    data = github_summary(db, start, end, settings.github_owner_login)
     data["range_name"] = range
     data["timezone"] = settings.display_timezone
     return data
