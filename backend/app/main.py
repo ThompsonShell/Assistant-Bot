@@ -68,31 +68,70 @@ def bootstrap_admin(session_local: sessionmaker) -> None:
 
 
 def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
-    """Start the background GitHub poll loop (best-effort; optional dependency)."""
-    if not (settings.enable_scheduler and settings.github_token):
+    """Start background jobs (best-effort; APScheduler is an optional dependency).
+
+    Runs two independent jobs when their prerequisites are met:
+      - GitHub poll loop (needs GITHUB_TOKEN)
+      - daily morning briefing at the configured hour (needs Telegram configured)
+    """
+    if not settings.enable_scheduler:
+        return
+    github_on = bool(settings.github_token)
+    telegram_on = bool(settings.telegram_bot_token and settings.telegram_chat_id)
+    morning_on = telegram_on and settings.morning_brief_enabled
+    if not (github_on or morning_on):
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
-
-        from .jobs.github_poll import run_poll_once
+        from apscheduler.triggers.cron import CronTrigger
     except Exception as exc:  # noqa: BLE001
         logger.warning("scheduler not started: %s", str(exc)[:200])
         return
 
     scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(
-        lambda: run_poll_once(session_local),
-        "interval",
-        seconds=max(30, settings.github_poll_interval_seconds),
-        id="github_poll",
-        max_instances=1,
-        coalesce=True,
-    )
+
+    if github_on:
+        from .jobs.github_poll import run_poll_once
+
+        scheduler.add_job(
+            lambda: run_poll_once(session_local),
+            "interval",
+            seconds=max(30, settings.github_poll_interval_seconds),
+            id="github_poll",
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if morning_on:
+        from zoneinfo import ZoneInfo
+
+        from .jobs.morning import send_morning_weather
+
+        try:
+            tz = ZoneInfo(settings.display_timezone)
+        except Exception:  # noqa: BLE001 - fall back to UTC on a bad tz name
+            tz = ZoneInfo("UTC")
+        scheduler.add_job(
+            send_morning_weather,
+            CronTrigger(
+                hour=settings.morning_brief_hour,
+                minute=settings.morning_brief_minute,
+                timezone=tz,
+            ),
+            id="morning_brief",
+            max_instances=1,
+            coalesce=True,
+        )
+
     scheduler.start()
     app.state.scheduler = scheduler
     logger.info(
-        "github poll scheduler started",
-        extra={"extra_fields": {"interval_s": settings.github_poll_interval_seconds}},
+        "scheduler started",
+        extra={"extra_fields": {
+            "github_poll": github_on,
+            "morning_brief": morning_on,
+            "morning_at": f"{settings.morning_brief_hour:02d}:{settings.morning_brief_minute:02d}",
+        }},
     )
 
 

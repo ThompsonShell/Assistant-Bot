@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     weather_latitude: float = 41.3111
     weather_longitude: float = 69.2797
 
+    # Daily morning briefing (weather + clothing tip) pushed to Telegram.
+    morning_brief_enabled: bool = True
+    morning_brief_hour: int = 8       # local hour (display_timezone)
+    morning_brief_minute: int = 0
+
     # GitHub monitoring (read-only)
     github_token: str | None = None
     github_api_base: str = "https://api.github.com"
