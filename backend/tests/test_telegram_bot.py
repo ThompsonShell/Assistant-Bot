@@ -114,6 +114,31 @@ def test_plan_tasks_done_commands():
     assert "Backend" not in tb.handle_text(db, FakeProvider(), "/tasks")
 
 
+def test_weather_command(monkeypatch):
+    from app.integrations.weather import Weather
+
+    db = _sessionmaker()()
+    fake = Weather(city="Toshkent", temp=18.0, feels_like=16.0, wind=12.0, code=61)
+    monkeypatch.setattr(tb, "_weather_text", tb._weather_text)  # keep real formatter
+    monkeypatch.setattr("app.integrations.weather.fetch_weather", lambda *a, **k: fake)
+
+    out = tb.handle_text(db, FakeProvider(), "/weather")
+    assert "Toshkent" in out
+    assert "18°C" in out and "16°C" in out
+    assert "Kiyim tavsiyasi" in out
+    assert "soyabon" in out.lower()  # rain tip (code 61)
+
+
+def test_weather_command_handles_failure(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("network down")
+
+    db = _sessionmaker()()
+    monkeypatch.setattr("app.integrations.weather.fetch_weather", boom)
+    out = tb.handle_text(db, FakeProvider(), "/weather")
+    assert "olib bo'lmadi" in out
+
+
 def test_owner_only(monkeypatch):
     from app.config import settings
 

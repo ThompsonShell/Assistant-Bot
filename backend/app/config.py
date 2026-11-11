@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Display
     display_timezone: str = "UTC"
 
+    # Weather (Open-Meteo — free, no API key). Defaults to Tashkent.
+    weather_city: str = "Toshkent"
+    weather_latitude: float = 41.3111
+    weather_longitude: float = 69.2797
+
     # GitHub monitoring (read-only)
     github_token: str | None = None
     github_api_base: str = "https://api.github.com"

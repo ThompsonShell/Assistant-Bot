@@ -55,6 +55,7 @@ HELP = (
     "📅 /plan <matn> — AI reja tuzadi va saqlaydi\n"
     "📅 /tasks — vazifalar ro'yxati\n"
     "📅 /done <raqam> — bajarildi deb belgilash\n"
+    "🌤 /weather — ob-havo va nima kiyish tavsiyasi\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
     "Oddiy matn yozsangiz — Claude javob beradi (ulangan bo'lsa)."
@@ -80,6 +81,7 @@ BOT_COMMANDS = [
     {"command": "plan", "description": "AI reja tuzish (saqlaydi)"},
     {"command": "tasks", "description": "Vazifalar ro'yxati"},
     {"command": "done", "description": "Vazifa bajarildi"},
+    {"command": "weather", "description": "Ob-havo va kiyim tavsiyasi"},
     {"command": "effort", "description": "Claude chuqurligi"},
     {"command": "help", "description": "Yordam"},
 ]
@@ -168,6 +170,8 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _events_text(db)
     if low == "/repos":
         return _repos_text(db)
+    if low in ("/weather", "/obhavo", "/ob-havo"):
+        return _weather_text()
     if low == "/effort" or low.startswith("/effort "):
         return _effort_text(t)
     if low == "/tasks":
@@ -260,6 +264,27 @@ def _mark_done(db, text: str) -> str:
     task.completed_at = dt.datetime.now(dt.timezone.utc)
     db.commit()
     return f"✅ Bajarildi: {task.title}"
+
+
+def _weather_text() -> str:
+    """/weather — current weather for the configured city plus a clothing tip.
+
+    Network/parse errors are caught and reported as a friendly message so the
+    command never crashes the bot.
+    """
+    from ..integrations.weather import clothing_advice, fetch_weather
+
+    try:
+        w = fetch_weather()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("weather fetch failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+        return "🌡 Ob-havo ma'lumotini olib bo'lmadi. Keyinroq urinib ko'ring."
+    return (
+        f"{w.emoji} *{w.city}* — hozir\n"
+        f"🌡 {w.temp:.0f}°C (his: {w.feels_like:.0f}°C)\n"
+        f"☁️ {w.description.capitalize()} · 💨 {w.wind:.0f} km/soat\n\n"
+        f"👕 *Kiyim tavsiyasi:*\n{clothing_advice(w)}"
+    )
 
 
 def _effort_text(text: str) -> str:
