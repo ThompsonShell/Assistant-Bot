@@ -70,7 +70,12 @@ class Settings(BaseSettings):
     # Only public channels are readable; private ones are not supported.
     watch_channels: str = ""
     # A post is forwarded only if it contains one of these words (comma-separated).
-    channel_keywords: str = "AI,LLM,Claude,OpenAI,Python,FastAPI,GitHub,security,release,Uzbekistan"
+    channel_keywords: str = (
+        "AI,LLM,Claude,OpenAI,Gemini,Python,FastAPI,GitHub,security,release,Uzbekistan,"
+        # MAANG companies and their main products
+        "Google,YouTube,Android,Meta,Facebook,Instagram,WhatsApp,"
+        "Apple,iPhone,Amazon,AWS,Netflix"
+    )
     channel_poll_minutes: int = 30
     channel_state_file: str = "channel_state.json"
 
