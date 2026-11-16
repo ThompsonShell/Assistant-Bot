@@ -15,26 +15,22 @@ from ..config import settings
 logger = logging.getLogger("lifeos.jobs.morning")
 
 
-def _news_block() -> str:
-    """Top few tech headlines for the morning brief ("" when disabled or empty).
+def _send_news(client: httpx.Client) -> None:
+    """Send the top stories as photo cards after the weather message.
 
-    Never raises: a news outage must not stop the weather part from arriving.
+    Never raises: a news outage must not turn the morning brief into an error.
     """
     count = settings.news_morning_count
     if not settings.news_enabled or count <= 0:
-        return ""
+        return
     try:
-        from ..integrations.news import fetch_news
+        from .telegram_bot import send_news_cards
 
-        items = fetch_news(limit=count)
+        send_news_cards(
+            client, settings.telegram_chat_id, limit=count, heading="🌍 Bugungi yangiliklar"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("morning news failed", extra={"extra_fields": {"error": str(exc)[:200]}})
-        return ""
-    if not items:
-        return ""
-    lines = ["", "", "🌍 *Bugungi yangiliklar:*"]
-    lines += [f"• {it.title}" for it in items]
-    return "\n".join(lines)
 
 
 def send_morning_weather(*, http: httpx.Client | None = None) -> bool:
@@ -53,8 +49,9 @@ def send_morning_weather(*, http: httpx.Client | None = None) -> bool:
     own = http is None
     client = http or httpx.Client(timeout=30)
     try:
-        text = "☀️ *Xayrli tong!*\n\n" + _weather_text() + _news_block()
+        text = "☀️ *Xayrli tong!*\n\n" + _weather_text()
         send_message(client, settings.telegram_chat_id, text)
+        _send_news(client)
         logger.info("morning brief sent")
         return True
     except Exception as exc:  # noqa: BLE001 - never crash the scheduler

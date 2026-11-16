@@ -33,6 +33,9 @@ _POST_RE = re.compile(r'data-post="([A-Za-z0-9_]+)/(\d+)"')
 _TEXT_RE = re.compile(
     r'tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', re.DOTALL
 )
+_PHOTO_RE = re.compile(
+    r"tgme_widget_message_photo_wrap[^>]*background-image:url\(['\"]([^'\"]+)['\"]\)"
+)
 _TAG_RE = re.compile(r"<[^>]+>")
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
@@ -42,6 +45,7 @@ class ChannelPost:
     channel: str
     post_id: int
     text: str
+    image: str | None = None  # photo attached to the post, if any
 
     @property
     def link(self) -> str:
@@ -71,7 +75,13 @@ def parse_channel_html(page: str, channel: str) -> list[ChannelPost]:
         raw = _BR_RE.sub("\n", text_m.group(1))
         text = html.unescape(_TAG_RE.sub("", raw)).strip()
         if text:
-            posts.append(ChannelPost(channel=channel, post_id=int(meta.group(2)), text=text))
+            photo = _PHOTO_RE.search(block)
+            image = html.unescape(photo.group(1)) if photo else None
+            if image and not image.startswith(("http://", "https://")):
+                image = None
+            posts.append(
+                ChannelPost(channel=channel, post_id=int(meta.group(2)), text=text, image=image)
+            )
     posts.sort(key=lambda p: p.post_id)  # oldest first
     return posts
 

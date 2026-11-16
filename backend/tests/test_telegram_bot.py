@@ -93,6 +93,51 @@ def test_today_splits_mine_and_overall(monkeypatch):
     assert "Hodisalar: 2" in out
 
 
+def _ev(gh_id, actor, title, when):
+    return GitHubEvent(
+        gh_id=gh_id, repo_full_name="o/r", type="Commit", actor_login=actor,
+        actor_type="human", title=title, created_at=when, ingested_at=when,
+    )
+
+
+def test_today_and_github_exclude_old_commits(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "display_timezone", "UTC")
+    db = _sessionmaker()()
+    now = dt.datetime.now(dt.timezone.utc)
+    db.add(_ev("new", "alice", "committed newnew1", now))
+    db.add(_ev("old", "bob", "committed oldold2", now - dt.timedelta(days=20)))
+    db.commit()
+
+    # /today lists who did what — but only today's action.
+    today = tb.handle_text(db, FakeProvider(), "/today")
+    assert "alice" in today and "newnew1" in today
+    assert "bob" not in today and "oldold2" not in today
+
+    # /github defaults to today as well; old commits need an explicit range.
+    gh = tb.handle_text(db, FakeProvider(), "/github")
+    assert "alice" in gh and "bob" not in gh
+    assert "bob" not in tb.handle_text(db, FakeProvider(), "/github week")
+    assert "bob" in tb.handle_text(db, FakeProvider(), "/github all")
+    assert "Foydalanish" in tb.handle_text(db, FakeProvider(), "/github nonsense")
+
+
+def test_week_lists_actors_with_counts(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "display_timezone", "UTC")
+    db = _sessionmaker()()
+    now = dt.datetime.now(dt.timezone.utc)
+    for i in range(3):
+        db.add(_ev(f"a{i}", "alice", f"committed a{i}", now))
+    db.add(_ev("b0", "bob", "committed b0", now))
+    db.commit()
+    out = tb.handle_text(db, FakeProvider(), "/week")
+    assert "Kim nima qildi" in out
+    assert "alice — 3" in out and "bob — 1" in out
+
+
 def test_summary_hint_without_owner_login(monkeypatch):
     from app.config import settings
 

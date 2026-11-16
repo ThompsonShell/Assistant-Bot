@@ -107,3 +107,124 @@ def test_news_command_and_channels_command(monkeypatch):
     monkeypatch.setattr(settings, "channel_keywords", "AI,Python")
     out = tb.handle_text(db, None, "/channels")
     assert "@techchan" in out and "@pychan" in out and "Python" in out
+
+
+# ── Photo cards ───────────────────────────────────────────────────────
+
+RSS_RICH = """<?xml version="1.0"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel>
+<item><title>Big chip launch</title><link>https://ex.com/chip</link>
+<description>&lt;p&gt;The company unveiled its newest processor today, promising big gains.&lt;/p&gt;</description>
+<media:content url="https://ex.com/chip.jpg" medium="image"/></item>
+<item><title>Inline image story</title><link>https://ex.com/inline</link>
+<content:encoded>&lt;img src="https://ex.com/inline.png"/&gt;&lt;p&gt;Body text that is long enough to count.&lt;/p&gt;</content:encoded></item>
+<item><title>HN style</title><link>https://ex.com/hn</link>
+<description>Article URL: https://x.com Comments URL: https://y.com Points: 5</description></item>
+</channel></rss>"""
+
+
+def test_parse_feed_extracts_summary_and_image():
+    items = {i.title: i for i in parse_feed(RSS_RICH, "ex.com")}
+    chip = items["Big chip launch"]
+    assert chip.image == "https://ex.com/chip.jpg"
+    assert chip.summary.startswith("The company unveiled")
+    assert "<p>" not in chip.summary
+    assert items["Inline image story"].image == "https://ex.com/inline.png"
+    # Hacker News style descriptions carry no useful text and no image.
+    hn = items["HN style"]
+    assert hn.summary == "" and hn.image is None
+
+
+def test_card_caption_short_and_with_link_at_bottom():
+    from app.integrations.news import NewsItem, card_caption, shorten
+
+    long_text = "word " * 200
+    item = NewsItem("Title", "https://ex.com/a", "ex.com", summary=shorten(long_text))
+    cap = card_caption(item)
+    assert cap.startswith("📰 Title")
+    assert len(item.summary) <= 301           # summary is cut short, not full text
+    assert cap.rstrip().endswith("— ex.com")
+    assert "🔗 https://ex.com/a" in cap
+    assert len(cap) < 1024
+
+    # No summary: just headline + link, nothing padded in between.
+    bare = card_caption(NewsItem("Only title", "https://ex.com/b", "ex.com"))
+    assert bare.count("\n\n") == 1
+
+
+class _Http:
+    """Records posts: (endpoint, payload). Optionally rejects photos."""
+
+    def __init__(self, reject_photo=False):
+        self.calls = []
+        self.reject_photo = reject_photo
+
+    def post(self, url, json=None, **kw):
+        self.calls.append((url.rsplit("/", 1)[-1], json))
+
+        class R:
+            status_code = 400 if (self.reject_photo and url.endswith("sendPhoto")) else 200
+
+        return R()
+
+    def get(self, *a, **k):  # no og:image lookups in these tests
+        raise RuntimeError("offline")
+
+
+def test_send_news_cards_photo_and_text_fallback(monkeypatch):
+    from app.integrations.news import NewsItem
+    from app.jobs import telegram_bot as tb
+
+    monkeypatch.setattr(settings, "news_enabled", True)
+    items = [
+        NewsItem("With pic", "https://ex.com/1", "ex.com", summary="Short blurb that is fine.", image="https://ex.com/1.jpg"),
+        NewsItem("No pic", "https://ex.com/2", "ex.com"),
+    ]
+    monkeypatch.setattr("app.integrations.news.fetch_news", lambda limit=8, http=None: items)
+
+    http = _Http()
+    assert tb.send_news_cards(http, 1, limit=5, heading="Head") == 2
+    kinds = [c[0] for c in http.calls]
+    assert kinds == ["sendMessage", "sendPhoto", "sendMessage"]   # heading, photo card, text card
+    photo = http.calls[1][1]
+    assert photo["photo"] == "https://ex.com/1.jpg"
+    assert "https://ex.com/1" in photo["caption"]
+
+    # Telegram can't load the image -> falls back to a text card with the link.
+    bad = _Http(reject_photo=True)
+    for it in items:
+        it.image = it.image  # unchanged
+    tb.send_news_cards(bad, 1, limit=5)
+    assert [c[0] for c in bad.calls] == ["sendPhoto", "sendMessage", "sendMessage"]
+    assert "https://ex.com/1" in bad.calls[1][1]["text"]
+
+
+def test_news_command_sends_cards(monkeypatch):
+    from app.integrations.news import NewsItem
+    from app.jobs import telegram_bot as tb
+    from app.db import Base, make_engine, make_sessionmaker
+
+    monkeypatch.setattr(settings, "telegram_chat_id", "999")
+    monkeypatch.setattr(settings, "telegram_bot_token", "x")
+    monkeypatch.setattr(settings, "news_enabled", True)
+    monkeypatch.setattr(
+        "app.integrations.news.fetch_news",
+        lambda limit=8, http=None: [NewsItem("T", "https://ex.com/t", "ex.com", image="https://ex.com/t.jpg")],
+    )
+    engine = make_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    http = _Http()
+    tb.process_update(http, make_sessionmaker(engine), None, {"message": {"chat": {"id": 999}, "text": "/news"}})
+    assert "sendPhoto" in [c[0] for c in http.calls]
+
+
+def test_channel_post_image_parsed_and_forwarded(monkeypatch):
+    page = (
+        '<div class="tgme_widget_message_wrap"><div data-post="testchan/9">'
+        '<a class="tgme_widget_message_photo_wrap" '
+        "style=\"width:200px;background-image:url('https://cdn.example/p.jpg')\"></a>"
+        '<div class="tgme_widget_message_text js-message_text">New AI model</div></div></div>'
+    )
+    post = ch.parse_channel_html(page, "testchan")[0]
+    assert post.image == "https://cdn.example/p.jpg"

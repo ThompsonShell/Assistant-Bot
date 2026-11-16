@@ -13,6 +13,7 @@ import datetime as dt
 import logging
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -50,7 +51,7 @@ HELP = (
     "/today — bugungi GitHub faoliyati\n"
     "/week — haftalik statistika\n"
     "/month — oylik statistika\n"
-    "/github — oxirgi hodisalar\n"
+    "/github [today|week|month|all] — kim nima qildi\n"
     "/repos — kuzatilayotgan repolar\n"
     "📅 /plan <matn> — AI reja tuzadi va saqlaydi\n"
     "📅 /tasks — vazifalar ro'yxati\n"
@@ -117,6 +118,51 @@ def send_message(http: httpx.Client, chat_id: Any, text: str, reply_markup=None)
         logger.warning("telegram send failed", extra={"extra_fields": {"error": str(exc)[:200]}})
 
 
+def send_photo(http: httpx.Client, chat_id: Any, photo_url: str, caption: str) -> bool:
+    """Send a photo (by URL) with a caption. Returns False when Telegram
+    rejects it (e.g. it cannot download the image) so callers can fall back
+    to a plain text message."""
+    payload = {"chat_id": chat_id, "photo": photo_url, "caption": caption[:1024]}
+    try:
+        resp = http.post(_api("sendPhoto"), json=payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("telegram photo failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+        return False
+    status = getattr(resp, "status_code", 200)
+    return not (isinstance(status, int) and status >= 400)
+
+
+def send_card(http: httpx.Client, chat_id: Any, text: str, image: str | None = None) -> None:
+    """Send text with an optional image above it; falls back to text only."""
+    if image and send_photo(http, chat_id, image, text):
+        return
+    send_message(http, chat_id, text)
+
+
+def send_news_cards(
+    http: httpx.Client, chat_id: Any, limit: int = 5, heading: str | None = None
+) -> int:
+    """Send each top tech story as its own card: image, short text, link.
+
+    Returns the number of cards sent. Missing cover images are looked up on the
+    article page (bounded); stories without an image are sent as text.
+    """
+    from ..integrations.news import card_caption, ensure_images, fetch_news
+
+    if not settings.news_enabled:
+        return 0
+    items = fetch_news(limit=limit, http=http)
+    if not items:
+        send_message(http, chat_id, "🌍 Hozircha yangilik topilmadi.")
+        return 0
+    ensure_images(items, http)
+    if heading:
+        send_message(http, chat_id, heading)
+    for item in items:
+        send_card(http, chat_id, card_caption(item), item.image)
+    return len(items)
+
+
 def set_bot_commands(http: httpx.Client) -> None:
     """Register the "/" menu of commands with Telegram."""
     try:
@@ -156,6 +202,20 @@ def _summary_text(db, range_name: str) -> str:
         f"👤 Odam: {a['human_events']} · 🤖 Avtomatika: {a['automation_events']}",
     ]
 
+    # Who did what — only inside this range, so old commits never leak in.
+    actors = list((a.get("by_actor") or {}).items())[:6]
+    if actors:
+        lines += ["", "👥 *Kim nima qildi:*"]
+        lines += [f"• {login} — {n}" for login, n in actors]
+    recent = _events_in_range(db, start, end, 5)
+    if recent:
+        fmt = "%H:%M" if range_name == "today" else "%d-%b %H:%M"
+        lines += ["", "🕒 *Oxirgi harakatlar:*"]
+        lines += [
+            f"• {_local_time(e.created_at, fmt)} {e.actor_login}: {e.title} — {e.repo_full_name}"
+            for e in recent
+        ]
+
     if mine is None:
         lines += [
             "",
@@ -166,16 +226,61 @@ def _summary_text(db, range_name: str) -> str:
     return "\n".join(lines)
 
 
-def _events_text(db, limit: int = 8) -> str:
-    """Format the most recent GitHub events (newest first) as a chat message."""
-    events = (
-        db.query(GitHubEvent).order_by(GitHubEvent.created_at.desc()).limit(limit).all()
+def _local_time(ts: dt.datetime, fmt: str) -> str:
+    """Format a stored UTC timestamp in the display timezone."""
+    if ts.tzinfo is None:  # SQLite returns naive datetimes; they are UTC
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    try:
+        tz = ZoneInfo(settings.display_timezone)
+    except Exception:  # noqa: BLE001 - unknown tz falls back to UTC
+        tz = ZoneInfo("UTC")
+    return ts.astimezone(tz).strftime(fmt)
+
+
+def _events_in_range(db, start: dt.datetime, end: dt.datetime, limit: int) -> list:
+    """Newest-first events whose time falls inside [start, end)."""
+    return (
+        db.query(GitHubEvent)
+        .filter(GitHubEvent.created_at >= start, GitHubEvent.created_at < end)
+        .order_by(GitHubEvent.created_at.desc())
+        .limit(limit)
+        .all()
     )
-    if not events:
-        return "Hali hodisa yo'q. Repo qo'shib, poll qiling."
-    lines = ["🔔 Oxirgi hodisalar:"]
+
+
+_RANGE_WORDS = {
+    "today": "today", "bugun": "today",
+    "week": "week", "hafta": "week",
+    "month": "month", "oy": "month",
+    "all": "all", "hammasi": "all",
+}
+
+
+def _events_text(db, range_name: str = "today", limit: int = 8) -> str:
+    """Format GitHub events with who did what, limited to a time range.
+
+    Defaults to today so old commits don't show up as if they were new.
+    ``range_name="all"`` returns the latest events regardless of date.
+    """
+    if range_name == "all":
+        events = (
+            db.query(GitHubEvent).order_by(GitHubEvent.created_at.desc()).limit(limit).all()
+        )
+        if not events:
+            return "Hali hodisa yo'q. Repo qo'shib, poll qiling."
+        lines = ["🔔 Oxirgi hodisalar (sanadan qat'i nazar):"]
+        fmt = "%d-%b %H:%M"
+    else:
+        start, end = compute_range(range_name, settings.display_timezone)
+        events = _events_in_range(db, start, end, limit)
+        if not events:
+            return f"🔔 {range_name.capitalize()}: hodisa yo'q."
+        lines = [f"🔔 Hodisalar — {range_name} ({settings.display_timezone}):"]
+        fmt = "%H:%M" if range_name == "today" else "%d-%b %H:%M"
     for e in events:
-        lines.append(f"• {e.actor_login} {e.title} — {e.repo_full_name}")
+        lines.append(
+            f"• {_local_time(e.created_at, fmt)} {e.actor_login} {e.title} — {e.repo_full_name}"
+        )
     return "\n".join(lines)
 
 
@@ -199,8 +304,12 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _summary_text(db, "week")
     if low == "/month":
         return _summary_text(db, "month")
-    if low in ("/github", "/events"):
-        return _events_text(db)
+    parts = low.split()
+    if parts and parts[0] in ("/github", "/events"):
+        word = parts[1] if len(parts) > 1 else "today"
+        if word not in _RANGE_WORDS:
+            return "Foydalanish: /github [today|week|month|all]"
+        return _events_text(db, _RANGE_WORDS[word])
     if low == "/repos":
         return _repos_text(db)
     if low == "/jira":
@@ -421,6 +530,18 @@ def process_update(http, session_local, provider, update: dict) -> None:
         logger.info("rejected non-owner chat", extra={"extra_fields": {"chat_id": chat_id}})
         return
     if not text:
+        return
+
+    if text.strip().lower() == "/news":
+        # News goes out as separate photo cards, not one text reply.
+        if not settings.news_enabled:
+            send_message(http, chat_id, _news_text())
+            return
+        try:
+            send_news_cards(http, chat_id, limit=5, heading="🌍 Texnologiya yangiliklari")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("news cards failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+            send_message(http, chat_id, "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring.")
         return
 
     with session_local() as db:

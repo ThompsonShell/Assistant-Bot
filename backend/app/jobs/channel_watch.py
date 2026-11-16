@@ -22,7 +22,7 @@ def run_channel_watch(*, http: httpx.Client | None = None) -> int:
         return 0
 
     from ..integrations.channels import collect_relevant, format_post, watched_channels
-    from .telegram_bot import send_message
+    from .telegram_bot import send_card
 
     if not watched_channels():
         return 0
@@ -32,7 +32,7 @@ def run_channel_watch(*, http: httpx.Client | None = None) -> int:
     sent = 0
     try:
         for post, hits in collect_relevant(http=client):
-            send_message(client, settings.telegram_chat_id, format_post(post, hits))
+            send_card(client, settings.telegram_chat_id, format_post(post, hits), post.image)
             sent += 1
     except Exception as exc:  # noqa: BLE001 - never crash the scheduler
         logger.warning("channel watch failed", extra={"extra_fields": {"error": str(exc)[:200]}})

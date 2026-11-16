@@ -27,6 +27,9 @@ os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = ""
 os.environ["USE_CLAUDE_SUBSCRIPTION"] = "false"
 os.environ["TELEGRAM_BOT_TOKEN"] = ""
 os.environ["TELEGRAM_CHAT_ID"] = ""
+# Never hit real news feeds or Telegram channels from the test suite.
+os.environ["NEWS_ENABLED"] = "false"
+os.environ["WATCH_CHANNELS"] = ""
 
 import fakeredis  # noqa: E402
 import pytest  # noqa: E402
