@@ -56,6 +56,24 @@ class Settings(BaseSettings):
     morning_brief_hour: int = 8       # local hour (display_timezone)
     morning_brief_minute: int = 0
 
+    # Tech news (public RSS/Atom feeds, no key). Comma-separated URLs.
+    news_enabled: bool = True
+    news_feeds: str = (
+        "https://hnrss.org/frontpage,"
+        "https://www.theverge.com/rss/index.xml,"
+        "https://techcrunch.com/feed/,"
+        "https://feeds.arstechnica.com/arstechnica/index"
+    )
+    news_morning_count: int = 3  # headlines included in the morning brief (0 = none)
+
+    # Public Telegram channels to watch (usernames, comma-separated, no @).
+    # Only public channels are readable; private ones are not supported.
+    watch_channels: str = ""
+    # A post is forwarded only if it contains one of these words (comma-separated).
+    channel_keywords: str = "AI,LLM,Claude,OpenAI,Python,FastAPI,GitHub,security,release,Uzbekistan"
+    channel_poll_minutes: int = 30
+    channel_state_file: str = "channel_state.json"
+
     # Jira Cloud (read-only). Shows issues assigned to you via /jira.
     # Create an API token at id.atlassian.com/manage-profile/security/api-tokens
     jira_base_url: str | None = None      # e.g. https://yoursite.atlassian.net

@@ -70,16 +70,18 @@ def bootstrap_admin(session_local: sessionmaker) -> None:
 def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
     """Start background jobs (best-effort; APScheduler is an optional dependency).
 
-    Runs two independent jobs when their prerequisites are met:
+    Runs independent jobs when their prerequisites are met:
       - GitHub poll loop (needs GITHUB_TOKEN)
       - daily morning briefing at the configured hour (needs Telegram configured)
+      - public Telegram channel watch (needs Telegram + WATCH_CHANNELS)
     """
     if not settings.enable_scheduler:
         return
     github_on = bool(settings.github_token)
     telegram_on = bool(settings.telegram_bot_token and settings.telegram_chat_id)
     morning_on = telegram_on and settings.morning_brief_enabled
-    if not (github_on or morning_on):
+    channels_on = telegram_on and bool(settings.watch_channels.strip())
+    if not (github_on or morning_on or channels_on):
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -123,6 +125,18 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
             coalesce=True,
         )
 
+    if channels_on:
+        from .jobs.channel_watch import run_channel_watch
+
+        scheduler.add_job(
+            run_channel_watch,
+            "interval",
+            minutes=max(5, settings.channel_poll_minutes),
+            id="channel_watch",
+            max_instances=1,
+            coalesce=True,
+        )
+
     scheduler.start()
     app.state.scheduler = scheduler
     logger.info(
@@ -130,6 +144,7 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
         extra={"extra_fields": {
             "github_poll": github_on,
             "morning_brief": morning_on,
+            "channel_watch": channels_on,
             "morning_at": f"{settings.morning_brief_hour:02d}:{settings.morning_brief_minute:02d}",
         }},
     )

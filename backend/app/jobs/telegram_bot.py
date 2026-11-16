@@ -56,6 +56,8 @@ HELP = (
     "📅 /tasks — vazifalar ro'yxati\n"
     "📅 /done <raqam> — bajarildi deb belgilash\n"
     "📋 /jira — menga tayinlangan Jira issue'lar\n"
+    "🌍 /news — dunyo texnologiya yangiliklari\n"
+    "📣 /channels — kuzatilayotgan kanallar\n"
     "🌤 /weather — ob-havo va nima kiyish tavsiyasi\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
@@ -83,6 +85,8 @@ BOT_COMMANDS = [
     {"command": "tasks", "description": "Vazifalar ro'yxati"},
     {"command": "done", "description": "Vazifa bajarildi"},
     {"command": "jira", "description": "Menga tayinlangan Jira issue'lar"},
+    {"command": "news", "description": "Dunyo texnologiya yangiliklari"},
+    {"command": "channels", "description": "Kuzatilayotgan kanallar"},
     {"command": "weather", "description": "Ob-havo va kiyim tavsiyasi"},
     {"command": "effort", "description": "Claude chuqurligi"},
     {"command": "help", "description": "Yordam"},
@@ -201,6 +205,10 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _repos_text(db)
     if low == "/jira":
         return _jira_text()
+    if low == "/news":
+        return _news_text()
+    if low == "/channels":
+        return _channels_text()
     if low in ("/weather", "/obhavo", "/ob-havo"):
         return _weather_text()
     if low == "/effort" or low.startswith("/effort "):
@@ -295,6 +303,42 @@ def _mark_done(db, text: str) -> str:
     task.completed_at = dt.datetime.now(dt.timezone.utc)
     db.commit()
     return f"✅ Bajarildi: {task.title}"
+
+
+def _news_text() -> str:
+    """/news — the latest headlines from the configured tech news feeds.
+
+    Feed failures are handled inside fetch_news, so this only needs to format
+    the result. Returns a friendly message if news is disabled.
+    """
+    from ..integrations.news import fetch_news, format_news
+
+    if not settings.news_enabled:
+        return "🌍 Yangiliklar o'chirilgan (NEWS_ENABLED=false)."
+    try:
+        items = fetch_news(limit=8)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("news fetch failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+        return "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring."
+    return format_news(items)
+
+
+def _channels_text() -> str:
+    """/channels — list the public Telegram channels being watched, with the
+    keywords that decide what gets forwarded."""
+    from ..integrations.channels import keywords, watched_channels
+
+    chans = watched_channels()
+    if not chans:
+        return (
+            "📣 Hech qanday kanal kuzatilmayapti.\n\n"
+            ".env'ga qo'shing (ommaviy kanal username'lari, @siz):\n"
+            "WATCH_CHANNELS=kanal1,kanal2"
+        )
+    lines = ["📣 *Kuzatilayotgan kanallar:*"]
+    lines += [f"• @{c}" for c in chans]
+    lines += ["", "Faqat shu kalit so'zlar bo'lgan postlar yuboriladi:", ", ".join(keywords())]
+    return "\n".join(lines)
 
 
 def _jira_text() -> str:
