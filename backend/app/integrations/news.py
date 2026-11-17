@@ -47,8 +47,10 @@ class NewsItem:
     image: str | None = None
 
 
-def feed_urls() -> list[str]:
-    return [u.strip() for u in (settings.news_feeds or "").split(",") if u.strip()]
+def feed_urls(topic: str = "tech") -> list[str]:
+    """Feed URLs for a topic: "tech" (default) or "space"."""
+    raw = settings.news_space_feeds if topic == "space" else settings.news_feeds
+    return [u.strip() for u in (raw or "").split(",") if u.strip()]
 
 
 def _http_url(url: str | None) -> str | None:
@@ -154,7 +156,9 @@ def parse_feed(xml_text: str, source: str) -> list[NewsItem]:
     return items
 
 
-def fetch_news(limit: int = 8, http: httpx.Client | None = None) -> list[NewsItem]:
+def fetch_news(
+    limit: int = 8, http: httpx.Client | None = None, topic: str = "tech"
+) -> list[NewsItem]:
     """Fetch all configured feeds and return the merged, de-duplicated headlines.
 
     Items are interleaved round-robin across sources so one busy feed does not
@@ -164,7 +168,7 @@ def fetch_news(limit: int = 8, http: httpx.Client | None = None) -> list[NewsIte
     client = http or httpx.Client(timeout=15, follow_redirects=True)
     per_feed: list[list[NewsItem]] = []
     try:
-        for url in feed_urls():
+        for url in feed_urls(topic):
             source = urlparse(url).netloc.removeprefix("www.")
             try:
                 resp = client.get(url)

@@ -74,6 +74,7 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
       - GitHub poll loop (needs GITHUB_TOKEN)
       - daily morning briefing at the configured hour (needs Telegram configured)
       - public Telegram channel watch (needs Telegram + WATCH_CHANNELS)
+      - study reminders: due words, diary, quiz (needs Telegram)
     """
     if not settings.enable_scheduler:
         return
@@ -81,7 +82,8 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
     telegram_on = bool(settings.telegram_bot_token and settings.telegram_chat_id)
     morning_on = telegram_on and settings.morning_brief_enabled
     channels_on = telegram_on and bool(settings.watch_channels.strip())
-    if not (github_on or morning_on or channels_on):
+    study_on = telegram_on and settings.study_enabled
+    if not (github_on or morning_on or channels_on or study_on):
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -104,15 +106,16 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
             coalesce=True,
         )
 
-    if morning_on:
-        from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo
 
+    try:
+        tz = ZoneInfo(settings.display_timezone)
+    except Exception:  # noqa: BLE001 - fall back to UTC on a bad tz name
+        tz = ZoneInfo("UTC")
+
+    if morning_on:
         from .jobs.morning import send_morning_weather
 
-        try:
-            tz = ZoneInfo(settings.display_timezone)
-        except Exception:  # noqa: BLE001 - fall back to UTC on a bad tz name
-            tz = ZoneInfo("UTC")
         scheduler.add_job(
             send_morning_weather,
             CronTrigger(
@@ -124,6 +127,27 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
             max_instances=1,
             coalesce=True,
         )
+
+    if study_on:
+        from .jobs import study_reminders as sr
+
+        hours = ",".join(
+            h.strip() for h in settings.study_review_hours.split(",") if h.strip().isdigit()
+        )
+        study_jobs = [
+            ("study_diary", sr.remind_diary, str(settings.study_diary_hour)),
+            ("study_quiz", sr.remind_quiz, str(settings.study_quiz_hour)),
+        ]
+        if hours:
+            study_jobs.append(("study_review", sr.remind_review, hours))
+        for job_id, func, hour in study_jobs:
+            scheduler.add_job(
+                lambda f=func: f(session_local),
+                CronTrigger(hour=hour, minute=0, timezone=tz),
+                id=job_id,
+                max_instances=1,
+                coalesce=True,
+            )
 
     if channels_on:
         from .jobs.channel_watch import run_channel_watch
@@ -145,6 +169,7 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
             "github_poll": github_on,
             "morning_brief": morning_on,
             "channel_watch": channels_on,
+            "study_reminders": study_on,
             "morning_at": f"{settings.morning_brief_hour:02d}:{settings.morning_brief_minute:02d}",
         }},
     )

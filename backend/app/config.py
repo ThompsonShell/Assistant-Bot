@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     morning_brief_hour: int = 8       # local hour (display_timezone)
     morning_brief_minute: int = 0
 
+    # Self-study: vocabulary reminders, diary reminder, periodic quiz.
+    study_enabled: bool = True
+    study_review_hours: str = "9,14,20"   # local hours to nudge about due words
+    study_diary_hour: int = 21            # evening nudge if today's diary is empty
+    study_quiz_every_days: int = 3        # suggest a quiz when the last one is this old
+    study_quiz_hour: int = 19
+
     # Tech news (public RSS/Atom feeds, no key). Comma-separated URLs.
     news_enabled: bool = True
     news_feeds: str = (
@@ -64,7 +71,15 @@ class Settings(BaseSettings):
         "https://techcrunch.com/feed/,"
         "https://feeds.arstechnica.com/arstechnica/index"
     )
-    news_morning_count: int = 3  # headlines included in the morning brief (0 = none)
+    news_morning_count: int = 3  # tech stories in the morning brief (0 = none)
+    # Space / NASA / cosmos feeds, shown by "/news space" and in the morning brief.
+    news_space_feeds: str = (
+        "https://www.nasa.gov/feed/,"
+        "https://www.space.com/feeds/all,"
+        "https://spacenews.com/feed/,"
+        "https://www.universetoday.com/feed"
+    )
+    news_morning_space_count: int = 2  # space stories in the morning brief (0 = none)
 
     # Public Telegram channels to watch (usernames, comma-separated, no @).
     # Only public channels are readable; private ones are not supported.
@@ -74,7 +89,9 @@ class Settings(BaseSettings):
         "AI,LLM,Claude,OpenAI,Gemini,Python,FastAPI,GitHub,security,release,Uzbekistan,"
         # MAANG companies and their main products
         "Google,YouTube,Android,Meta,Facebook,Instagram,WhatsApp,"
-        "Apple,iPhone,Amazon,AWS,Netflix"
+        "Apple,iPhone,Amazon,AWS,Netflix,"
+        # space
+        "NASA,SpaceX,Starship,Artemis,Mars,JWST"
     )
     channel_poll_minutes: int = 30
     channel_state_file: str = "channel_state.json"

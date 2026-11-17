@@ -22,7 +22,9 @@ from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
+from ..models.study import VocabCard
 from ..providers import get_provider
+from ..study import service as study
 
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -57,9 +59,17 @@ HELP = (
     "📅 /tasks — vazifalar ro'yxati\n"
     "📅 /done <raqam> — bajarildi deb belgilash\n"
     "📋 /jira — menga tayinlangan Jira issue'lar\n"
-    "🌍 /news — dunyo texnologiya yangiliklari\n"
+    "🌍 /news [space] — texnologiya / kosmos yangiliklari\n"
     "📣 /channels — kuzatilayotgan kanallar\n"
     "🌤 /weather — ob-havo va nima kiyish tavsiyasi\n"
+    "📚 /word so'z - ma'no — so'z qo'shish\n"
+    "📚 /review — so'z takrorlash (kartochkalar)\n"
+    "📚 /words — so'zlar statistikasi\n"
+    "📓 /learned <matn> — bugun nimani o'rgandim\n"
+    "📓 /recall <matn> — qaramasdan, yodimdan yozdim\n"
+    "📓 /diary [week] — kundalik va ketma-ket kunlar\n"
+    "🧪 /quiz — imtihon (/quiz stop)\n"
+    "💻 /drill <mavzu> — qo'lda yoziladigan kod mashqi\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
     "Oddiy matn yozsangiz — Claude javob beradi (ulangan bo'lsa)."
@@ -89,6 +99,13 @@ BOT_COMMANDS = [
     {"command": "news", "description": "Dunyo texnologiya yangiliklari"},
     {"command": "channels", "description": "Kuzatilayotgan kanallar"},
     {"command": "weather", "description": "Ob-havo va kiyim tavsiyasi"},
+    {"command": "word", "description": "So'z qo'shish: so'z - ma'no"},
+    {"command": "review", "description": "So'z takrorlash"},
+    {"command": "learned", "description": "Bugun nimani o'rgandim"},
+    {"command": "recall", "description": "Yodimdan yozish (output)"},
+    {"command": "diary", "description": "Kundalik"},
+    {"command": "quiz", "description": "Imtihon"},
+    {"command": "drill", "description": "Qo'lda kod mashqi"},
     {"command": "effort", "description": "Claude chuqurligi"},
     {"command": "help", "description": "Yordam"},
 ]
@@ -140,7 +157,11 @@ def send_card(http: httpx.Client, chat_id: Any, text: str, image: str | None = N
 
 
 def send_news_cards(
-    http: httpx.Client, chat_id: Any, limit: int = 5, heading: str | None = None
+    http: httpx.Client,
+    chat_id: Any,
+    limit: int = 5,
+    heading: str | None = None,
+    topic: str = "tech",
 ) -> int:
     """Send each top tech story as its own card: image, short text, link.
 
@@ -151,7 +172,7 @@ def send_news_cards(
 
     if not settings.news_enabled:
         return 0
-    items = fetch_news(limit=limit, http=http)
+    items = fetch_news(limit=limit, http=http, topic=topic)
     if not items:
         send_message(http, chat_id, "🌍 Hozircha yangilik topilmadi.")
         return 0
@@ -161,6 +182,79 @@ def send_news_cards(
     for item in items:
         send_card(http, chat_id, card_caption(item), item.image)
     return len(items)
+
+
+def _tg(http: httpx.Client, method: str, payload: dict) -> None:
+    """Call a Telegram method, logging (never raising) on failure."""
+    try:
+        http.post(_api(method), json=payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"telegram {method} failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+
+
+def _front_keyboard(card_id: int) -> dict:
+    return {"inline_keyboard": [[{"text": "👁 Javobni ko'rsat", "callback_data": f"rv:show:{card_id}"}]]}
+
+
+def _rating_keyboard(card_id: int) -> dict:
+    def btn(label: str, grade: str) -> dict:
+        return {"text": label, "callback_data": f"rv:rate:{card_id}:{grade}"}
+
+    return {"inline_keyboard": [
+        [btn("❌ Bilmadim", "again"), btn("😐 Qiyin", "hard")],
+        [btn("✅ Yaxshi", "good"), btn("⚡️ Oson", "easy")],
+    ]}
+
+
+def send_review_card(http: httpx.Client, chat_id: Any, db, exclude_id: int | None = None) -> bool:
+    """Send the next due vocabulary card with a "show answer" button.
+    Returns False (and says so) when nothing is due."""
+    today = study.local_today()
+    card = study.next_card(db, today, exclude_id)
+    if card is None:
+        send_message(http, chat_id, "🎉 Bugunlik takrorlash tugadi! Yangi so'z: /word")
+        return False
+    waiting = len(study.due_cards(db, today))
+    send_message(
+        http, chat_id, f"{study.card_front(card)}\n\n🔁 Navbatda: {waiting}",
+        reply_markup=_front_keyboard(card.id),
+    )
+    return True
+
+
+def process_callback(http, session_local, cb: dict) -> None:
+    """Handle a tap on a review button (owner only)."""
+    msg = cb.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    message_id = msg.get("message_id")
+    _tg(http, "answerCallbackQuery", {"callback_query_id": cb.get("id")})
+    if str(chat_id) != str(settings.telegram_chat_id):
+        return
+
+    parts = (cb.get("data") or "").split(":")
+    if parts[0] != "rv" or len(parts) < 2:
+        return
+    with session_local() as db:
+        if parts[1] == "start":
+            send_review_card(http, chat_id, db)
+        elif parts[1] == "show" and len(parts) == 3 and parts[2].isdigit():
+            card = db.get(VocabCard, int(parts[2]))
+            if card is not None:
+                _tg(http, "editMessageText", {
+                    "chat_id": chat_id, "message_id": message_id,
+                    "text": study.card_back(card), "reply_markup": _rating_keyboard(card.id),
+                })
+        elif parts[1] == "rate" and len(parts) == 4 and parts[2].isdigit():
+            card = study.rate_card(db, int(parts[2]), parts[3])
+            if card is None:
+                return
+            when = "bugun yana ko'rsatiladi" if card.interval_days == 0 else f"{card.interval_days} kundan keyin"
+            _tg(http, "editMessageText", {
+                "chat_id": chat_id, "message_id": message_id,
+                "text": f"✅ {card.word} — {card.meaning}\n⏭ {when}",
+                "reply_markup": {"inline_keyboard": []},
+            })
+            send_review_card(http, chat_id, db, exclude_id=card.id)
 
 
 def set_bot_commands(http: httpx.Client) -> None:
@@ -298,6 +392,9 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
     low = t.lower()
     if low in ("/start", "/help", "start", "help"):
         return HELP
+    studied = study.handle_study(db, provider, t)  # /word /learned /quiz ... or a quiz answer
+    if studied is not None:
+        return studied
     if low == "/today":
         return _summary_text(db, "today")
     if low in ("/week", "/stats"):
@@ -314,8 +411,9 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _repos_text(db)
     if low == "/jira":
         return _jira_text()
-    if low == "/news":
-        return _news_text()
+    if low.split()[:1] == ["/news"]:
+        arg = low.split()[1] if len(low.split()) > 1 else "tech"
+        return _news_text("space" if arg in ("space", "kosmos") else "tech")
     if low == "/channels":
         return _channels_text()
     if low in ("/weather", "/obhavo", "/ob-havo"):
@@ -414,7 +512,7 @@ def _mark_done(db, text: str) -> str:
     return f"✅ Bajarildi: {task.title}"
 
 
-def _news_text() -> str:
+def _news_text(topic: str = "tech") -> str:
     """/news — the latest headlines from the configured tech news feeds.
 
     Feed failures are handled inside fetch_news, so this only needs to format
@@ -425,11 +523,12 @@ def _news_text() -> str:
     if not settings.news_enabled:
         return "🌍 Yangiliklar o'chirilgan (NEWS_ENABLED=false)."
     try:
-        items = fetch_news(limit=8)
+        items = fetch_news(limit=8, topic=topic)
     except Exception as exc:  # noqa: BLE001
         logger.warning("news fetch failed", extra={"extra_fields": {"error": str(exc)[:200]}})
         return "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring."
-    return format_news(items)
+    title = "🚀 *Kosmos yangiliklari*" if topic == "space" else "🌍 *Texnologiya yangiliklari*"
+    return format_news(items, title)
 
 
 def _channels_text() -> str:
@@ -518,6 +617,10 @@ def _effort_text(text: str) -> str:
 def process_update(http, session_local, provider, update: dict) -> None:
     """Handle one Telegram update: reject non-owner chats, route the text
     through :func:`handle_text`, and reply (with the main keyboard on /start)."""
+    if update.get("callback_query"):
+        process_callback(http, session_local, update["callback_query"])
+        return
+
     msg = update.get("message") or update.get("edited_message") or {}
     chat = msg.get("chat") or {}
     chat_id = chat.get("id")
@@ -532,13 +635,21 @@ def process_update(http, session_local, provider, update: dict) -> None:
     if not text:
         return
 
-    if text.strip().lower() == "/news":
+    if text.strip().lower().split()[:1] == ["/review"]:
+        with session_local() as db:
+            send_review_card(http, chat_id, db)
+        return
+
+    news_parts = text.strip().lower().split()
+    if news_parts and news_parts[0] == "/news":
         # News goes out as separate photo cards, not one text reply.
+        topic = "space" if len(news_parts) > 1 and news_parts[1] in ("space", "kosmos") else "tech"
         if not settings.news_enabled:
-            send_message(http, chat_id, _news_text())
+            send_message(http, chat_id, _news_text(topic))
             return
+        heading = "🚀 Kosmos yangiliklari" if topic == "space" else "🌍 Texnologiya yangiliklari"
         try:
-            send_news_cards(http, chat_id, limit=5, heading="🌍 Texnologiya yangiliklari")
+            send_news_cards(http, chat_id, limit=5, heading=heading, topic=topic)
         except Exception as exc:  # noqa: BLE001
             logger.warning("news cards failed", extra={"extra_fields": {"error": str(exc)[:200]}})
             send_message(http, chat_id, "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring.")

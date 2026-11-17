@@ -98,7 +98,7 @@ def test_news_command_and_channels_command(monkeypatch):
     db = make_sessionmaker(engine)()
 
     monkeypatch.setattr(settings, "news_enabled", True)
-    monkeypatch.setattr("app.integrations.news.fetch_news", lambda limit=8, http=None: parse_feed(RSS, "ex.com")[:limit])
+    monkeypatch.setattr("app.integrations.news.fetch_news", lambda limit=8, http=None, topic="tech": parse_feed(RSS, "ex.com")[:limit])
     assert "Claude 5 released" in tb.handle_text(db, None, "/news")
 
     monkeypatch.setattr(settings, "watch_channels", "")
@@ -181,7 +181,7 @@ def test_send_news_cards_photo_and_text_fallback(monkeypatch):
         NewsItem("With pic", "https://ex.com/1", "ex.com", summary="Short blurb that is fine.", image="https://ex.com/1.jpg"),
         NewsItem("No pic", "https://ex.com/2", "ex.com"),
     ]
-    monkeypatch.setattr("app.integrations.news.fetch_news", lambda limit=8, http=None: items)
+    monkeypatch.setattr("app.integrations.news.fetch_news", lambda limit=8, http=None, topic="tech": items)
 
     http = _Http()
     assert tb.send_news_cards(http, 1, limit=5, heading="Head") == 2
@@ -210,7 +210,7 @@ def test_news_command_sends_cards(monkeypatch):
     monkeypatch.setattr(settings, "news_enabled", True)
     monkeypatch.setattr(
         "app.integrations.news.fetch_news",
-        lambda limit=8, http=None: [NewsItem("T", "https://ex.com/t", "ex.com", image="https://ex.com/t.jpg")],
+        lambda limit=8, http=None, topic="tech": [NewsItem("T", "https://ex.com/t", "ex.com", image="https://ex.com/t.jpg")],
     )
     engine = make_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)

@@ -16,21 +16,29 @@ logger = logging.getLogger("lifeos.jobs.morning")
 
 
 def _send_news(client: httpx.Client) -> None:
-    """Send the top stories as photo cards after the weather message.
+    """Send top tech and space stories as photo cards after the weather message.
 
     Never raises: a news outage must not turn the morning brief into an error.
     """
-    count = settings.news_morning_count
-    if not settings.news_enabled or count <= 0:
+    if not settings.news_enabled:
         return
-    try:
-        from .telegram_bot import send_news_cards
+    from .telegram_bot import send_news_cards
 
-        send_news_cards(
-            client, settings.telegram_chat_id, limit=count, heading="🌍 Bugungi yangiliklar"
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("morning news failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+    for topic, count, heading in (
+        ("tech", settings.news_morning_count, "🌍 Bugungi yangiliklar"),
+        ("space", settings.news_morning_space_count, "🚀 Kosmos"),
+    ):
+        if count <= 0:
+            continue
+        try:
+            send_news_cards(
+                client, settings.telegram_chat_id, limit=count, heading=heading, topic=topic
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "morning news failed",
+                extra={"extra_fields": {"topic": topic, "error": str(exc)[:200]}},
+            )
 
 
 def send_morning_weather(*, http: httpx.Client | None = None) -> bool:
