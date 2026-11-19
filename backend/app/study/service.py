@@ -14,7 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ..config import settings
-from ..models.study import DiaryEntry, QuizSession, VocabCard
+from ..models.study import DiaryEntry, QuizSession, ReadingLog, VocabCard
 from ..providers.base import extract_json
 from .srs import GRADES, schedule
 

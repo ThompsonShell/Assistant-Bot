@@ -15,7 +15,7 @@ from typing import Callable
 import httpx
 
 from ..config import settings
-from ..study import service as study
+from ..study import reading, service as study
 
 logger = logging.getLogger("lifeos.jobs.study")
 
@@ -81,5 +81,28 @@ def remind_quiz(session_local, http: httpx.Client | None = None) -> bool:
         if not study.quiz_due(db, every):
             return None
         return f"🧪 Imtihon vaqti (har {every} kunda). Tayyormisiz?\n\n/quiz — boshlash", None
+
+    return _run(session_local, http, build)
+
+
+def remind_reading(session_local, http: httpx.Client | None = None) -> bool:
+    """On Monday, Friday and Sunday: nudge about the planned reading until it is done."""
+    def build(db) -> Message | None:
+        today = study.local_today()
+        kind = reading.assignment_kind(today)
+        if kind is None:
+            return None
+        done = (
+            db.query(study.ReadingLog)
+            .filter(study.ReadingLog.day == today, study.ReadingLog.kind == kind,
+                    study.ReadingLog.status == "done")
+            .first()
+        )
+        if done is not None:
+            return None
+        return (
+            f"📰 Bugun reading kuni: {reading.KIND_LABEL[kind]}\n"
+            "15–20 daqiqa. /read — boshlash"
+        ), None
 
     return _run(session_local, http, build)

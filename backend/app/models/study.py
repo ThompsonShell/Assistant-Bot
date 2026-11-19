@@ -60,3 +60,30 @@ class QuizSession(Base):
     index: Mapped[int] = mapped_column(Integer, default=0)       # next question to ask
     correct: Mapped[float] = mapped_column(Float, default=0.0)   # partial credit allowed
     finished: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class ReadingLog(Base):
+    """One reading session (vocab text, technical article or space article)."""
+
+    __tablename__ = "reading_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[dt.date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(16))              # vocab | tech | space
+    title: Mapped[str] = mapped_column(String(300))
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    blurb: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    words_sent: Mapped[int] = mapped_column(Integer, default=0)  # unknown words saved (max 5)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)  # 2 English sentences
+    example_done: Mapped[bool] = mapped_column(Boolean, default=False)  # tried a docs example
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)  # open | done
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyKV(Base):
+    """Small key/value store for study settings (current weekly topic, start date)."""
+
+    __tablename__ = "study_kv"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")

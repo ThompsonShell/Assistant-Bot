@@ -24,7 +24,7 @@ from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
 from ..models.study import VocabCard
 from ..providers import get_provider
-from ..study import service as study
+from ..study import reading, service as study
 
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -70,6 +70,9 @@ HELP = (
     "📓 /diary [week] — kundalik va ketma-ket kunlar\n"
     "🧪 /quiz — imtihon (/quiz stop)\n"
     "💻 /drill <mavzu> — qo'lda yoziladigan kod mashqi\n"
+    "📰 /read [tech|space] — bugungi maqola (du: so'z, ju: texnik, yak: kosmos)\n"
+    "📰 /summary <matn> — 2 gaplik ingliz xulosasi, /tried — misolni sinadim\n"
+    "📰 /topic <mavzu> — haftalik mavzu, /readlog — o'qishlar tarixi\n"
     "/effort — Claude chuqurligi (low/medium/high)\n"
     "/help — yordam\n\n"
     "Oddiy matn yozsangiz — Claude javob beradi (ulangan bo'lsa)."
@@ -106,6 +109,9 @@ BOT_COMMANDS = [
     {"command": "diary", "description": "Kundalik"},
     {"command": "quiz", "description": "Imtihon"},
     {"command": "drill", "description": "Qo'lda kod mashqi"},
+    {"command": "read", "description": "Bugungi maqola"},
+    {"command": "summary", "description": "Maqola xulosasi (ingliz tilida)"},
+    {"command": "topic", "description": "Haftalik mavzu"},
     {"command": "effort", "description": "Claude chuqurligi"},
     {"command": "help", "description": "Yordam"},
 ]
@@ -392,6 +398,9 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
     low = t.lower()
     if low in ("/start", "/help", "start", "help"):
         return HELP
+    read = reading.handle_reading(db, provider, t)  # /read /summary /topic ... (also /word cap)
+    if read is not None:
+        return read
     studied = study.handle_study(db, provider, t)  # /word /learned /quiz ... or a quiz answer
     if studied is not None:
         return studied

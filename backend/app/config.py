@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     study_diary_hour: int = 21            # evening nudge if today's diary is empty
     study_quiz_every_days: int = 3        # suggest a quiz when the last one is this old
     study_quiz_hour: int = 19
+    # Article reading: Monday vocab text, Friday technical article, Sunday space article.
+    study_reading_hour: int = 18
+    # Feeds searched for the Friday technical article (comma-separated RSS/Atom URLs).
+    reading_tech_feeds: str = "https://realpython.com/atom.xml"
 
     # Tech news (public RSS/Atom feeds, no key). Comma-separated URLs.
     news_enabled: bool = True

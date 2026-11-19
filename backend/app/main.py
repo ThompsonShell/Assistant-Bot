@@ -137,6 +137,7 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
         study_jobs = [
             ("study_diary", sr.remind_diary, str(settings.study_diary_hour)),
             ("study_quiz", sr.remind_quiz, str(settings.study_quiz_hour)),
+            ("study_reading", sr.remind_reading, str(settings.study_reading_hour)),
         ]
         if hours:
             study_jobs.append(("study_review", sr.remind_review, hours))
