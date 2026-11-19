@@ -1,7 +1,8 @@
 # Architecture (Phase 0 discovery)
 
-Written 2026-11-19 from reading the code at commit `69bd973`. Facts only;
-decisions are in `OPEN_QUESTIONS.md`. Nothing in this file needed new code.
+Written 2026-11-19 from reading the code at commit `69bd973`, updated the same day
+for master plan v2 (paper diary by photo, statistics). Facts only; decisions are
+in `OPEN_QUESTIONS.md`. Nothing in this file needed new code.
 
 ## 1. Stack at a glance
 
@@ -72,11 +73,39 @@ Consequences for the mentor plan:
 - Anthropic's own docs say products should use API-key auth; subscription use is a gray area accepted for private single-user use. This is the owner's decision (OPEN_QUESTIONS Q11).
 - The bot's code blocks the Telegram thread while the CLI runs, so a long AI call delays the next update.
 
+## 5a. Photos, files and vision (needed by plan v2, section 7b)
+
+The paper-diary flow is the new core of Phase 1. Today the bot cannot do any step of it:
+
+| Needed | Today |
+|---|---|
+| Receive a photo and its caption | **No.** `process_update` only reads `message.text`. `photo`, `caption`, `voice`, `document` are ignored |
+| Download the file from Telegram | No `getFile` call; no download code |
+| Send a local image (charts, heatmap) | **No.** `send_photo` sends a *URL* only. Uploading a file needs a multipart request |
+| Give an image to Claude | **No.** The CLI provider pipes **text** to `claude -p` on stdin with `--tools ""`. The API provider (`claude_api.py`) has no image code either |
+| Keep photos privately | No storage folder exists. Only `*.db` is gitignored; a `data/` folder would need its own ignore rule |
+| Draw charts / heatmap | No `matplotlib`/`Pillow` in `requirements.txt` |
+| Multi-step conversation (confirm / edit field / ask a follow-up) | Only inline buttons for review cards and the quiz table. No generic "pending flow" state |
+| Inline button callbacks | Yes (`process_callback`, owner-only) |
+
+**Vision through the owner's subscription is the main unknown.** `claude` 2.1.328 offers
+`--input-format stream-json` and `--allowedTools`, which are the two likely routes
+(send the image as a content block, or allow only the Read tool on one temp file).
+I did **not** test either: the sandbox has no logged-in Claude, and I did not want to
+send anything on the owner's behalf. It needs a 10-minute spike on the owner's machine
+(OPEN_QUESTIONS Q15). The plain Claude API supports images natively, but no API key is
+configured.
+
+Handwriting that mixes Uzbek and English is a quality risk for any vision model. The
+plan's "nothing counts until confirmed" rule is the right safeguard and should be kept
+exactly as written.
+
 ## 6. Data model: what exists vs the plan's section 14
 
 | Plan table | Exists as | Gap |
 |---|---|---|
-| `diary_entries` | `diary_entries(day, learned, recalled, ...)` | plan has 7 fields (`input, output, mistakes, words, question, tomorrow, lang_ratio`); here only `learned` (=input) and `recalled` (=output) |
+| `diary_entries` | `diary_entries(day, learned, recalled, ...)` | plan has 7 fields plus `source` (`paper_photo` or `text`); here only `learned` (=input) and `recalled` (=output) |
+| `paper_entries` | none | photo paths, transcription, parsed JSON, minutes per category, AI-off minutes, `confirmed` flag |
 | `cards` | `vocab_cards` | uses **SM-2** (`interval_days, ease, reps, lapses`), plan wants **Leitner boxes 1/3/7/14/30**; no `type`, `source`, `active` |
 | `card_reviews` | none | |
 | `queue_words` | none | needed for the 1100-word PDF queue |
@@ -116,7 +145,9 @@ Read-only by design: one call, `POST /rest/api/3/search/jql` with Basic auth (`J
 - Whether the news feeds and `t.me/s/<channel>` pages work from the owner's network. The build sandbox blocks outside hosts, so article fetching, images and Open-Meteo were only tested with fixtures.
 - The PDF's location and whether it has a text layer or is scanned.
 - Whether IELTS audio exists.
-- Telegram voice-note behaviour: not implemented, so untested.
+- Telegram voice-note and photo behaviour: not implemented, so untested.
+- Whether `claude -p` can read an image on the owner's setup (see 5a).
+- How well Claude reads the owner's handwriting (Uzbek + English). Only a real sample page can answer this.
 
 ## 10. Documentation that is out of date
 

@@ -3,6 +3,7 @@
 Newest first. One entry per feature or fix.
 
 ## 2026-11-19
+- **Docs:** updated for master plan v2 (paper diary by photo, statistics): new section 5a in `ARCHITECTURE.md`, questions Q15-Q19 in `OPEN_QUESTIONS.md`. Still no feature code.
 - **Docs:** Phase 0 discovery: `ARCHITECTURE.md`, `OPEN_QUESTIONS.md`. No feature code.
 - **Reading routine:** `/read`, `/summary`, `/tried`, `/topic`, `/readlog`; Mon/Fri/Sun reminder; max 5 new words per article. Tables `reading_logs`, `study_kv` (Alembic 0005).
 - **Dependencies:** upgraded to latest (FastAPI 0.164, SQLAlchemy 2.1, pydantic 2.14, redis 8, pytest 9, ...).
