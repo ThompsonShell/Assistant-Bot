@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 
 from ..config import settings
-from ..models.study import DiaryEntry, ReadingLog, VocabCard
+from ..models.study import DiaryEntry, PaperEntry, ReadingLog, VocabCard
 from ..models.task import Task
 from ..study import reading, service as study
 from . import registry
@@ -31,24 +31,98 @@ def empty_state_button(cmd: str, reply_text: str) -> Button | None:
     return None
 
 
-# ── diary progress (used by the menu, /bugun and the next-action rule) ──
+# ── diary progress (used by the menu, /bugun, /diary and the next-action rule) ──
+
+WORDS_TARGET = 3  # the paper template has "3 WORDS" per day
+
+
+def words_today(db, today: dt.date) -> int:
+    since = dt.datetime.combine(today, dt.time.min, dt.timezone.utc)
+    return db.query(VocabCard).filter(VocabCard.created_at >= since).count()
+
+
+def paper_status(db, today: dt.date) -> str:
+    """"confirmed", "pending" (photo read, not confirmed) or "none"."""
+    entry = db.query(PaperEntry).filter(PaperEntry.day == today).first()
+    if entry is None:
+        return "none"
+    return "confirmed" if entry.confirmed else "pending"
+
 
 def diary_items(db, today: dt.date) -> dict[str, bool]:
     entry = db.query(DiaryEntry).filter(DiaryEntry.day == today).first()
-    words_today = (
-        db.query(VocabCard)
-        .filter(VocabCard.created_at >= dt.datetime.combine(today, dt.time.min, dt.timezone.utc))
-        .count()
-    )
     return {
         "learned": bool(entry and (entry.learned or "").strip()),
         "recalled": bool(entry and (entry.recalled or "").strip()),
-        "words": words_today > 0,
+        "words": words_today(db, today) >= WORDS_TARGET,
+        "photo": paper_status(db, today) == "confirmed",
     }
+
+
+def diary_complete(items: dict[str, bool]) -> bool:
+    """The day counts as done without a photo: text input/output and the words
+    are enough (paper is the preferred way, /diary text is the fallback)."""
+    return items["learned"] and items["recalled"] and items["words"]
 
 
 def _diary_line(items: dict[str, bool]) -> str:
     return "".join("✅" if v else "▫️" for v in items.values()) + f" {sum(items.values())}/{len(items)}"
+
+
+def diary_checklist(db) -> Reply:
+    """Today's diary as a checklist, with a button for every missing item."""
+    today = study.local_today()
+    items = diary_items(db, today)
+    n_words = words_today(db, today)
+    photo = paper_status(db, today)
+
+    def mark(ok: bool) -> str:
+        return "✅" if ok else "▫️"
+
+    lines = [
+        f"📓 Kundalik — {today.strftime('%a %d-%b')} · 🔥 {study.diary_streak(db, today)} kun",
+        "",
+        f"{mark(items['learned'])} 📥 O'rgandim (input)",
+        f"{mark(items['recalled'])} 📤 Yodimdan yozdim (output)",
+        f"{'✅' if items['words'] else '🟡' if n_words else '▫️'} 📚 So'zlar: {n_words}/{WORDS_TARGET}",
+        f"{'✅' if photo == 'confirmed' else '🟡' if photo == 'pending' else '▫️'} 📷 Qog'oz kundalik"
+        + (" (tasdiqlanmagan)" if photo == "pending" else ""),
+    ]
+    rows: list[list[Button]] = []
+    if not items["learned"]:
+        rows.append([do("📥 O'rgandim", "/learned")])
+    if not items["recalled"]:
+        rows.append([do("📤 Yodimdan", "/recall")])
+    if not items["words"]:
+        rows.append([do("➕ So'z qo'shish", "/word")])
+    if photo == "none":
+        rows.append([do("📷 Rasm yuborish", "/photo")])
+    if not rows:
+        lines += ["", "🎉 Bugun hammasi tayyor!"]
+        rows.append([best_next(db, skip="/diary")])
+    return Reply("\n".join(lines), rows)
+
+
+PAPER_TEMPLATE = """DATE: 2026-__-__
+TIME (min): Python __  SQL __  English __  Algo __  Other __   | AI-off: __
+LEARNED (input):
+WROTE MYSELF (output):
+MISTAKES:
+3 WORDS:
+QUESTION:
+TOMORROW:"""
+
+
+def photo_help() -> Reply:
+    return Reply(
+        "📷 Qog'oz kundalik\n\n"
+        "Bugungi sahifaning rasmini shu yerga yuboring (bir nechta rasm ham mumkin). "
+        "Bot o'qiydi va sizdan tasdiq so'raydi. Tasdiqlamaguncha statistikaga qo'shilmaydi.\n\n"
+        "Sahifa tepasiga shuni yozing:\n" + PAPER_TEMPLATE + "\n\n"
+        "Maslahat: raqamlar aniq, har yorliq alohida qatorda, sana 2026-11-20 shaklida.\n"
+        "Boshqa kun uchun: rasm izohiga date: 2026-11-19 yozing (48 soatgacha).",
+        [[do("📓 Matnda yozish", "/learned")]],
+    )
 
 
 # ── best next action ────────────────────────────────────────────────────
@@ -67,7 +141,7 @@ def best_next(db, skip: str | None = None) -> Button:
     due = len(study.due_cards(db, today))
     if due:
         candidates.append(("/review", do(f"🔁 Takrorlash ({due})", "/review")))
-    if not all(diary_items(db, today).values()):
+    if not diary_complete(diary_items(db, today)):
         candidates.append(("/diary", do("📓 Kundalikni to'ldirish", "/diary")))
     if db.query(ReadingLog).filter(ReadingLog.status == "open").first() is not None:
         candidates.append(("/summary", do("📝 Xulosa yozish", "/summary")))

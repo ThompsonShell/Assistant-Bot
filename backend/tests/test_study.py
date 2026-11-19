@@ -4,7 +4,7 @@ from app.config import settings
 from app.db import Base, make_engine, make_sessionmaker
 from app.jobs import study_reminders as sr
 from app.jobs import telegram_bot as tb
-from app.models.study import QuizSession, VocabCard
+from app.models.study import PaperEntry, QuizSession, VocabCard
 from app.study import service as study
 from app.study.srs import schedule
 
@@ -302,20 +302,34 @@ def test_review_reminder_only_when_due(monkeypatch):
     assert payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "rv:start"
 
 
-def test_diary_reminder_until_both_parts_written(monkeypatch):
+def test_diary_reminder_asks_for_the_photo_until_the_day_is_done(monkeypatch):
     _configure(monkeypatch)
     sm = _sm()
     http = Http()
     assert sr.remind_diary(sm, http) is True
-    assert "input va output" in http.calls[-1][1]["text"]
-    with sm() as db:
+    text = http.calls[-1][1]["text"]
+    assert "rasmga olib yuboring" in text
+    assert http.calls[-1][1]["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "do:/diary"
+
+    with sm() as db:       # text fallback: input alone is not enough
         study.append_diary(db, "learned", "x")
-    sr.remind_diary(sm, http)
-    assert "output" in http.calls[-1][1]["text"]
+    assert sr.remind_diary(sm, http) is True
     with sm() as db:
         study.append_diary(db, "recalled", "y")
     n = len(http.calls)
-    assert sr.remind_diary(sm, http) is False and len(http.calls) == n
+    assert sr.remind_diary(sm, http) is False and len(http.calls) == n   # text input + output
+
+    # A confirmed paper entry also silences it; an unconfirmed one asks to confirm.
+    sm2, http2 = _sm(), Http()
+    with sm2() as db:
+        db.add(PaperEntry(day=study.local_today(), confirmed=False))
+        db.commit()
+    assert sr.remind_diary(sm2, http2) is True and "tasdiqlanmagan" in http2.calls[-1][1]["text"]
+    with sm2() as db:
+        db.query(PaperEntry).one().confirmed = True
+        db.commit()
+    n = len(http2.calls)
+    assert sr.remind_diary(sm2, http2) is False and len(http2.calls) == n
 
 
 def test_quiz_reminder_and_disabled(monkeypatch):

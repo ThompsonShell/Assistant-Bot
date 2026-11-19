@@ -231,10 +231,11 @@ def test_best_next_action_priority(db):
 
 def test_best_next_falls_back_to_the_menu(db):
     today = study.local_today()
-    study.add_words(db, "abide - rioya qilmoq")
-    study.rate_card(db, db.query(VocabCard).one().id, "good", today)   # nothing due
+    study.add_words(db, "a1 - bir\na2 - ikki\na3 - uch")
+    for card in db.query(VocabCard).all():
+        study.rate_card(db, card.id, "good", today)               # nothing due
     study.append_diary(db, "learned", "x")
-    study.append_diary(db, "recalled", "y")                      # words added today -> diary complete
+    study.append_diary(db, "recalled", "y")                      # + 3 words today -> day complete
     assert callbacks(say(db, "/effort")) == ["do:/menu"]
 
 
@@ -293,3 +294,78 @@ def test_do_buttons_from_strangers_are_ignored(monkeypatch):
     assert all(c[0] == "answerCallbackQuery" for c in http.calls)
     with sm() as db:
         assert state.get_state(db) is None
+
+
+# ── /diary checklist ──────────────────────────────────────────────────
+
+def _lines(reply):
+    return {l.split(" ", 1)[0]: l for l in reply.text.splitlines()}
+
+
+def test_diary_checklist_empty_day_offers_every_missing_item(db):
+    r = say(db, "/diary")
+    assert "Kundalik" in r.text and r.text.count("▫️") == 4
+    assert callbacks(r) == ["do:/learned", "do:/recall", "do:/word", "do:/photo"]
+
+
+def test_diary_checklist_marks_progress_and_drops_finished_buttons(db):
+    study.append_diary(db, "learned", "ORM basics")
+    study.add_words(db, "a1 - bir\na2 - ikki")                   # 2 of 3 words
+    r = say(db, "/diary")
+    assert "✅ 📥" in r.text and "▫️ 📤" in r.text
+    assert "🟡 📚 So'zlar: 2/3" in r.text                         # partly done
+    assert callbacks(r) == ["do:/recall", "do:/word", "do:/photo"]   # learned has no button
+
+    study.append_diary(db, "recalled", "ORM maps tables to classes")
+    study.add_words(db, "a3 - uch")
+    r = say(db, "/diary")
+    assert "✅ 📚 So'zlar: 3/3" in r.text
+    assert callbacks(r) == ["do:/photo"]                         # only the paper photo is left
+
+
+def test_diary_checklist_with_pending_and_confirmed_photo(db):
+    from app.models.study import PaperEntry
+
+    today = study.local_today()
+    db.add(PaperEntry(day=today, confirmed=False))
+    db.commit()
+    r = say(db, "/diary")
+    assert "🟡 📷 Qog'oz kundalik (tasdiqlanmagan)" in r.text
+    assert "do:/photo" not in callbacks(r)                       # photo already sent
+
+    db.query(PaperEntry).one().confirmed = True
+    db.commit()
+    assert "✅ 📷" in say(db, "/diary").text
+
+
+def test_diary_checklist_complete_day_celebrates_and_suggests_something_else(db):
+    study.append_diary(db, "learned", "x")
+    study.append_diary(db, "recalled", "y")
+    study.add_words(db, "a1 - bir\na2 - ikki\na3 - uch")
+    r = say(db, "/diary")
+    assert "Bugun hammasi tayyor" not in r.text and callbacks(r) == ["do:/photo"]   # photo still open
+
+    from app.models.study import PaperEntry
+
+    db.add(PaperEntry(day=study.local_today(), confirmed=True))
+    db.commit()
+    r = say(db, "/diary")
+    assert "Bugun hammasi tayyor" in r.text and r.text.count("✅") == 4
+    assert len(buttons(r)) == 1 and "do:/diary" not in callbacks(r)
+
+
+def test_diary_subcommands_keep_their_old_meaning(db):
+    study.append_diary(db, "learned", "ORM basics")
+    assert "ORM basics" in say(db, "/diary show").text           # the old text view
+    assert "Ketma-ket" in say(db, "/diary week").text
+
+
+def test_photo_help_explains_the_template(db):
+    r = say(db, "/photo")
+    assert "DATE:" in r.text and "TIME (min)" in r.text and "date: 2026" in r.text
+    assert buttons(r)
+
+
+def test_menu_shows_four_diary_marks(db):
+    r = say(db, "/menu")
+    assert "Kundalik: ▫️▫️▫️▫️ 0/4" in r.text

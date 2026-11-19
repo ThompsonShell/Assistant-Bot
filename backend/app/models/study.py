@@ -87,3 +87,25 @@ class StudyKV(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class PaperEntry(Base):
+    """A handwritten diary page sent as a photo (one row per day).
+
+    Nothing counts in statistics until ``confirmed`` is true: the owner checks
+    what the bot read from the page and presses Confirm.
+    """
+
+    __tablename__ = "paper_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[dt.date] = mapped_column(Date, unique=True, index=True)
+    photo_paths: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    transcription: Mapped[str] = mapped_column(Text, default="")        # as read, never "fixed"
+    parsed: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # learned, output, mistakes, ...
+    minutes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict) # python, sql, english, algo, other
+    ai_off_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)      # asked once next morning
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

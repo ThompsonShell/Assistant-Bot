@@ -15,6 +15,7 @@ from typing import Callable
 import httpx
 
 from ..config import settings
+from ..bot import views
 from ..study import reading, service as study
 
 logger = logging.getLogger("lifeos.jobs.study")
@@ -57,20 +58,24 @@ def remind_review(session_local, http: httpx.Client | None = None) -> bool:
 
 
 def remind_diary(session_local, http: httpx.Client | None = None) -> bool:
+    """Evening nudge: ask for today's paper diary photo (text /diary is the fallback).
+    Skipped when a confirmed photo exists or the text diary already has input and output."""
     def build(db) -> Message | None:
         today = study.local_today()
-        entry = db.query(study.DiaryEntry).filter(study.DiaryEntry.day == today).first()
-        if entry is not None and (entry.learned or "").strip() and (entry.recalled or "").strip():
-            return None  # input and output both written
+        items = views.diary_items(db, today)
+        if items["photo"] or (items["learned"] and items["recalled"]):
+            return None
+        status = views.paper_status(db, today)
         streak = study.diary_streak(db, today)
-        missing = "input va output" if entry is None else (
-            "output (qaramasdan yozish)" if (entry.learned or "").strip() else "input"
-        )
-        return (
-            f"📓 Kunni yakunlang: bugungi {missing} yozilmadi.\n\n"
-            "/learned — nimani o'rgandim\n/recall — qaramasdan, yodimdan\n"
-            f"🔥 Ketma-ket: {streak} kun — uzib qo'ymang!"
-        ), None
+        if status == "pending":
+            text = "📷 Qog'oz kundalik o'qildi, lekin tasdiqlanmagan. Rasmdagi xabardagi Tasdiqlash tugmasini bosing."
+        else:
+            text = (
+                "📷 Bugungi qog'oz kundalikni rasmga olib yuboring.\n"
+                "Qog'oz bo'lmasa, matnda yozing."
+            )
+        text += f"\n🔥 Ketma-ket: {streak} kun, uzib qo'ymang!"
+        return text, {"inline_keyboard": [[{"text": "📓 Matnda yozish", "callback_data": "do:/diary"}]]}
 
     return _run(session_local, http, build)
 

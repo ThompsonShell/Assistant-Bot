@@ -454,6 +454,10 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
             return views.more_screen()
         if cmd == "/bugun":
             return views.today_view(db)
+        if cmd == "/photo":
+            return views.photo_help()
+        if cmd == "/diary" and len(t.split()) == 1:
+            return views.diary_checklist(db)
         if len(t.split()) == 1:  # bare command: ask one question
             started = flows.start(db, cmd)
             if started is not None:

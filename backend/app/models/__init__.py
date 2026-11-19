@@ -4,11 +4,11 @@ from .bot_state import ConversationState
 from .conversation import ChatMessage
 from .github import GitHubEvent, GitHubRepo
 from .notification import Notification
-from .study import DiaryEntry, QuizSession, ReadingLog, StudyKV, VocabCard
+from .study import DiaryEntry, PaperEntry, QuizSession, ReadingLog, StudyKV, VocabCard
 from .task import Task
 from .user import User
 
 __all__ = [
     "User", "AuditLog", "GitHubRepo", "GitHubEvent", "Notification", "Task", "ChatMessage",
-    "VocabCard", "DiaryEntry", "QuizSession", "ReadingLog", "StudyKV", "ConversationState",
+    "VocabCard", "DiaryEntry", "QuizSession", "ReadingLog", "StudyKV", "ConversationState", "PaperEntry",
 ]
