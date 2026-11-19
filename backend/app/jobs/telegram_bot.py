@@ -470,6 +470,17 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
             return views.photo_help()
         if cmd == "/diary" and len(t.split()) == 1:
             return views.diary_checklist(db)
+        if cmd == "/stats":
+            words = t.lower().split()
+            arg = words[1] if len(words) > 1 else "week"
+            if arg in ("github", "git"):  # the old meaning of /stats: GitHub activity this week
+                return Reply(handle_text(db, provider, "/week", history)).with_next(views.best_next(db))
+            if arg in views.PERIOD_WORDS:
+                return views.stats_reply(db, views.PERIOD_WORDS[arg])
+            return Reply("Foydalanish: /stats [kun|hafta|oy|yil]  (GitHub uchun: /stats github)",
+                         [[do("📆 Hafta", "/stats week")]])
+        if cmd == "/streak":
+            return views.streak_reply(db)
         paper_reply = paper_flow.command(db, cmd, t)  # /date, /delete_entry
         if paper_reply is not None:
             return paper_reply.with_next(views.best_next(db, skip=cmd))

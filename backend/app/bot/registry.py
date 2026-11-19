@@ -47,6 +47,7 @@ COMMANDS: list[Cmd] = [
     Cmd("date", "Keyingi rasm qaysi kun uchun", G_DIARY),
     Cmd("delete_entry", "Qog'oz yozuvni o'chirish", G_DIARY),
     Cmd("stats", "Statistika (kun/hafta/oy/yil)", G_DIARY),
+    Cmd("streak", "Ketma-ket kunlar", G_DIARY),
     Cmd("plan", "AI reja tuzish", G_PLAN),
     Cmd("tasks", "Vazifalar ro'yxati", G_PLAN),
     Cmd("done", "Vazifa bajarildi", G_PLAN),

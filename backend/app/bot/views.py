@@ -7,7 +7,7 @@ import datetime as dt
 from ..config import settings
 from ..models.study import DiaryEntry, PaperEntry, ReadingLog, VocabCard
 from ..models.task import Task
-from ..study import reading, service as study
+from ..study import reading, service as study, stats
 from . import registry
 from .ui import Button, Reply, do
 
@@ -230,3 +230,34 @@ def today_view(db) -> Reply:
     if study.quiz_due(db, settings.study_quiz_every_days, today):
         lines.append("🧪 Imtihon vaqti keldi")
     return Reply("\n".join(lines)).with_next(best_next(db, skip="/today"))
+
+
+# ── statistics ────────────────────────────────────────────────────────────
+
+PERIOD_WORDS = {
+    "day": "day", "kun": "day", "bugun": "day",
+    "week": "week", "hafta": "week",
+    "month": "month", "oy": "month",
+    "year": "year", "yil": "year",
+}
+_PERIOD_BUTTONS = [("day", "📅 Kun"), ("week", "📆 Hafta"), ("month", "🗓 Oy"), ("year", "📈 Yil")]
+
+
+def stats_reply(db, period: str = "week") -> Reply:
+    """Statistics for a period, with buttons for the other periods."""
+    if not stats.has_data(db):
+        return Reply(
+            "📈 Hali kundalik yozuv yo'q. Statistika qog'oz kundalik rasmidan (yoki matnli kundalikdan) hisoblanadi.",
+            [[do("📷 Rasm yuborish", "/photo")]],
+        )
+    result = stats.compute(db, period)
+    rows = [[do(label, f"/stats {p}") for p, label in _PERIOD_BUTTONS if p != period]]
+    if result.calendar_days == 0:
+        rows.insert(0, [do("📷 Rasm yuborish", "/photo")])
+    return Reply(stats.stats_text(result), rows)
+
+
+def streak_reply(db) -> Reply:
+    if not stats.has_data(db):
+        return Reply("🔥 Hali kundalik yozuv yo'q. Birinchi kunni boshlang!", [[do("📷 Rasm yuborish", "/photo")]])
+    return Reply(stats.streak_text(db)).with_next(best_next(db, skip="/streak"))

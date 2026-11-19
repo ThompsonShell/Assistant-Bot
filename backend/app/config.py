@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # Paper diary photos: private local folder (gitignored) and the backfill window.
     diary_photo_dir: str = "data/diary_photos"
     diary_backfill_hours: int = 48
+    # First day of the 3-month plan; statistics count calendar days from here.
+    stats_start_date: str = "2026-11-20"
     # Feeds searched for the Friday technical article (comma-separated RSS/Atom URLs).
     reading_tech_feeds: str = "https://realpython.com/atom.xml"
 
