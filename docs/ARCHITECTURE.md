@@ -31,12 +31,14 @@ There is no separate worker. One process runs: web app, Telegram thread, schedul
 
 - Runs in a daemon thread (`run_bot`). Only starts when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set.
 - **Owner-only**: `process_update` compares `chat.id` with `TELEGRAM_CHAT_ID`; everyone else gets a refusal. Callback buttons are checked the same way.
-- **How commands are registered** (all by hand, there is no decorator/registry):
-  1. `handle_text(db, provider, text)` is one `if` chain returning a reply string. Order: help, `reading.handle_reading`, `study.handle_study`, github ranges, repos, jira, news, channels, weather, effort, tasks, plan, done, unknown `/x`, then free text goes to `provider.chat`.
-  2. `process_update` handles what needs more than a string: `callback_query` (review buttons), `/news` (photo cards), `/review` (inline keyboard). It runs before `handle_text`.
-  3. `HELP` (text) and `BOT_COMMANDS` (the "/" menu, sent with `setMyCommands` at start) are separate manual lists. A new command has to be added to both, plus `MAIN_KEYBOARD` if it should be a button.
-- **Only text is read.** `process_update` ignores messages without `text`, so voice, photos and documents are dropped today.
-- **No conversation state except one table**: an unfinished `quiz_sessions` row makes plain text count as a quiz answer. There is no multi-step "flow" mechanism yet (the plan's `/diary` flow needs one).
+- **How commands are registered** (updated 2026-11-19):
+  1. `app/bot/registry.py` is the one list of commands (name, short description, group, optional "needs" setting). The "/" menu, the "Yana" screen and the main menu are built from it; commands whose feature is not configured (`/jira`, `/channels`, `/news` when disabled) are hidden from all of them but still answer if typed.
+  2. `handle_message(db, provider, text) -> Reply` is what the owner sees. A `Reply` is text plus inline buttons (`app/bot/ui.py`). It adds the menu screens (`/start /help /menu /more /bugun /diary /stats /streak /photo`), guided conversations, empty-state buttons and **one best-next-action button** under every reply (`app/bot/views.py::best_next`).
+  3. `handle_text(db, provider, text) -> str` is still the one-message router (an `if` chain: reading, study, github ranges, jira, news, weather, effort, tasks, plan, done, then free text to `provider.chat`). `handle_message` calls it, so every old command keeps working.
+  4. `process_update` handles what needs more than a string: photos, `callback_query`, `/news` (photo cards), `/review` (inline keyboard).
+  5. Most buttons are `do:<command>`: tapping one runs that command exactly as if it was typed.
+- **Guided conversations** (`app/bot/flows.py`, `paper_flow.py`): a bare command (`/word`, `/learned`, `/recall`, `/summary`, `/plan`, `/done`, `/topic`, `/drill`, `/date`, `/delete_entry`) asks one question and stores what it waits for in the `conversation_state` table (one row, 30-minute expiry). The next plain message is used as the answer. A new command or `/cancel` drops the pending question.
+- **Photos are handled** (`_photo_of`, `_download_file`, `_handle_owner_photo`): the largest size, or an image sent as a file, up to 10 MB, owner only, edits ignored. Voice notes and other files are still dropped.
 - Free-text chat calls `provider.chat(text, system=SYSTEM_PROMPT)` with **no history** in the Telegram path (the web chat API keeps history in `chat_messages`).
 - Message size: `send_message` cuts at 4000 chars; photo captions at 1024.
 
@@ -50,11 +52,12 @@ Timezone for cron jobs = `DISPLAY_TIMEZONE` (**code default is `UTC`**, so the o
 | `morning_brief` | 08:00 | weather + clothing, then news cards: 3 tech + 2 space |
 | `channel_watch` | every 30 min (min 5) | forward keyword-matching posts from public channels |
 | `study_review` | 09:00, 14:00, 20:00 | "N cards due" with a Start button, only if N > 0 |
-| `study_diary` | 21:00 | nudge if today's diary lacks input or output |
+| `study_diary` | 21:00 | asks for the paper-diary photo (text `/diary` is the fallback); quiet once a photo is confirmed or text input+output exist |
 | `study_quiz` | 19:00 | suggest a quiz when the last one is 3+ days old |
 | `study_reading` | 18:00 | Mon/Fri/Sun reading nudge until done |
+| `study_unconfirmed` | 08:10 | shows each unconfirmed paper-diary entry once |
 
-Up to **6 proactive messages per day** can be sent today (see OPEN_QUESTIONS Q5).
+Up to **8 proactive messages per day** can be sent today (brief, unconfirmed entry, 3 review nudges, reading, quiz, diary), against the plan's limit of 2 (see OPEN_QUESTIONS Q5). Not changed yet, because the owner has not answered Q5.
 
 ## 5. How Claude is called (`app/providers/`)
 
@@ -73,39 +76,41 @@ Consequences for the mentor plan:
 - Anthropic's own docs say products should use API-key auth; subscription use is a gray area accepted for private single-user use. This is the owner's decision (OPEN_QUESTIONS Q11).
 - The bot's code blocks the Telegram thread while the CLI runs, so a long AI call delays the next update.
 
-## 5a. Photos, files and vision (needed by plan v2, section 7b)
+## 5a. Photos, files and vision (plan v2, section 7b)
 
-The paper-diary flow is the new core of Phase 1. Today the bot cannot do any step of it:
+Status after the 2026-11-19 implementation:
 
-| Needed | Today |
+| Needed | Now |
 |---|---|
-| Receive a photo and its caption | **No.** `process_update` only reads `message.text`. `photo`, `caption`, `voice`, `document` are ignored |
-| Download the file from Telegram | No `getFile` call; no download code |
-| Send a local image (charts, heatmap) | **No.** `send_photo` sends a *URL* only. Uploading a file needs a multipart request |
-| Give an image to Claude | **No.** The CLI provider pipes **text** to `claude -p` on stdin with `--tools ""`. The API provider (`claude_api.py`) has no image code either |
-| Keep photos privately | No storage folder exists. Only `*.db` is gitignored; a `data/` folder would need its own ignore rule |
-| Draw charts / heatmap | No `matplotlib`/`Pillow` in `requirements.txt` |
-| Multi-step conversation (confirm / edit field / ask a follow-up) | Only inline buttons for review cards and the quiz table. No generic "pending flow" state |
-| Inline button callbacks | Yes (`process_callback`, owner-only) |
+| Receive a photo and its caption | **Done.** `message.photo` (largest size) and image documents; caption read for `date: YYYY-MM-DD` |
+| Download the file from Telegram | **Done.** `getFile` then the file URL, 10 MB limit |
+| Keep photos privately | **Done.** `data/diary_photos/` (`DIARY_PHOTO_DIR`), `data/` is gitignored, files are mode 600, removed by `/delete_entry` or "Qayta rasm". Photos are still sent to Claude to be read |
+| Give an image to Claude | **Code done, one route unverified.** `ClaudeApiProvider.vision` sends a base64 image block (standard API). `ClaudeAgentProvider.vision` runs `claude -p` with **only the Read tool** on a private temporary copy. Both are tested with fakes only |
+| Multi-step conversation | **Done.** `conversation_state` table |
+| Send a local image (charts, heatmap) | Not done. `send_photo` sends a URL only; Phase 7 |
+| Draw charts / heatmap | Not done. No `matplotlib` yet; Phase 7 |
 
-**Vision through the owner's subscription is the main unknown.** `claude` 2.1.328 offers
-`--input-format stream-json` and `--allowedTools`, which are the two likely routes
-(send the image as a content block, or allow only the Read tool on one temp file).
-I did **not** test either: the sandbox has no logged-in Claude, and I did not want to
-send anything on the owner's behalf. It needs a 10-minute spike on the owner's machine
-(OPEN_QUESTIONS Q15). The plain Claude API supports images natively, but no API key is
-configured.
+**The CLI vision route has never run against a real login** (OPEN_QUESTIONS Q15). If it
+fails, the bot keeps the photo and asks for the numbers by typing, so the day is
+not lost; it does not invent anything. The plain Claude API route needs
+`ANTHROPIC_API_KEY`, which is not configured.
 
-Handwriting that mixes Uzbek and English is a quality risk for any vision model. The
-plan's "nothing counts until confirmed" rule is the right safeguard and should be kept
-exactly as written.
+How the flow protects the data: the prompt forbids correcting or inventing text and
+asks for `null` when unsure; numbers are validated (0-1440 per field, a day cannot
+exceed 24 h) and never guessed; missing numbers are asked one at a time; the date
+comes from the caption, then `/date`, then the page, then today, and can always be
+corrected; nothing counts until Confirm; an unreadable page is discarded and a
+retake is requested.
+
+Handwriting that mixes Uzbek and English is a quality risk for any vision model.
+Only a real sample page can show how well it works.
 
 ## 6. Data model: what exists vs the plan's section 14
 
 | Plan table | Exists as | Gap |
 |---|---|---|
 | `diary_entries` | `diary_entries(day, learned, recalled, ...)` | plan has 7 fields plus `source` (`paper_photo` or `text`); here only `learned` (=input) and `recalled` (=output) |
-| `paper_entries` | none | photo paths, transcription, parsed JSON, minutes per category, AI-off minutes, `confirmed` flag |
+| `paper_entries` | `paper_entries` (Alembic 0007) | done: one row per day, photo paths, transcription, parsed JSON, minutes per category, AI-off, `confirmed`, `reminded`. Mistakes stay on the entry until an error log exists |
 | `cards` | `vocab_cards` | uses **SM-2** (`interval_days, ease, reps, lapses`), plan wants **Leitner boxes 1/3/7/14/30**; no `type`, `source`, `active` |
 | `card_reviews` | none | |
 | `queue_words` | none | needed for the 1100-word PDF queue |
@@ -116,6 +121,7 @@ exactly as written.
 | `leet_problems` | none | |
 | `english_scores` | none | |
 | `settings` | `study_kv(key, value)` | currently holds `topic` and `reading_start` only |
+| (not in plan) | `conversation_state` | what the bot waits for after a bare command or a photo (Alembic 0006) |
 | (not in plan) | `reading_logs` | article routine: kind, url, words sent, 2-sentence summary, example tried |
 | (existing) | `tasks`, `chat_messages`, `github_repos`, `github_events`, `notifications`, `users`, `audit_logs` | `tasks` has `scheduled_date, category, source`, so lessons can appear as tasks |
 
@@ -125,7 +131,7 @@ All study data lives in the local database file. `*.db` is gitignored.
 
 From the plan's rule 1 (must not break): `/today /week /month /github /repos /plan /tasks /done /jira /news /channels /weather /effort /help` and free-text chat. All still work.
 
-Added after the plan author's snapshot (not in the plan): `/word /words /review /learned /recall /diary /quiz /drill /read /summary /tried /topic /readlog`. Several of them overlap with the plan's commands (OPEN_QUESTIONS Q2, Q3, Q4).
+Added after the plan author's snapshot: `/word /words /review /learned /recall /diary /quiz /drill /read /summary /tried /topic /readlog`. Added from master plan v2: `/menu /bugun /photo /date /delete_entry /stats /streak /cancel`, plus sending a photo. `/stats` used to be an alias of `/week`; that is now `/stats github`. Several of them overlap with the plan's commands (OPEN_QUESTIONS Q2, Q3, Q4).
 
 Changed behaviour you may not expect: `/github` now defaults to **today** (`all` shows the old list); `/today /week /month` list who did what; `/news` and the morning brief send photo cards.
 
@@ -145,8 +151,8 @@ Read-only by design: one call, `POST /rest/api/3/search/jql` with Basic auth (`J
 - Whether the news feeds and `t.me/s/<channel>` pages work from the owner's network. The build sandbox blocks outside hosts, so article fetching, images and Open-Meteo were only tested with fixtures.
 - The PDF's location and whether it has a text layer or is scanned.
 - Whether IELTS audio exists.
-- Telegram voice-note and photo behaviour: not implemented, so untested.
-- Whether `claude -p` can read an image on the owner's setup (see 5a).
+- Telegram voice notes: not implemented.
+- Whether `claude -p` can read an image on the owner's setup (see 5a). Photo download and the whole confirm flow were tested with fake Telegram and fake vision only.
 - How well Claude reads the owner's handwriting (Uzbek + English). Only a real sample page can answer this.
 
 ## 10. Documentation that is out of date

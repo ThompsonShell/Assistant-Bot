@@ -22,7 +22,8 @@ CANCEL = ("❌ Bekor qilish", "do:/cancel")
 
 
 def _snip(text: str, n: int = 160) -> str:
-    text = " ".join((text or "").split())
+    """Shorten for the summary; separate lines stay visible as " · "."""
+    text = " · ".join(line.strip() for line in (text or "").splitlines() if line.strip())
     return text if len(text) <= n else text[: n - 1] + "…"
 
 

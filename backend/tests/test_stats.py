@@ -261,3 +261,12 @@ def test_day_stats_with_nothing_yet_asks_for_the_photo(db, monkeypatch):
     paper(db, today - dt.timedelta(days=1), python=60)
     r = say(db, "/stats day")
     assert "Bugun hali yozuv yo'q" in r.text and cbs(r)[0] == "do:/photo"
+
+
+def test_stats_tell_you_when_an_entry_is_only_waiting_for_confirmation(db):
+    paper(db, study.local_today(), confirmed=False, python=60)
+    r = say(db, "/stats")
+    assert "1 ta qog'oz kundalik tasdiq kutmoqda" in r.text and cbs(r) == ["do:/diary"]
+    db.query(PaperEntry).one().confirmed = True
+    db.commit()
+    assert "tasdiq kutmoqda" not in say(db, "/stats").text

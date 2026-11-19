@@ -246,6 +246,13 @@ _PERIOD_BUTTONS = [("day", "📅 Kun"), ("week", "📆 Hafta"), ("month", "🗓 
 def stats_reply(db, period: str = "week") -> Reply:
     """Statistics for a period, with buttons for the other periods."""
     if not stats.has_data(db):
+        waiting = db.query(PaperEntry).filter(PaperEntry.confirmed.is_(False)).count()
+        if waiting:
+            return Reply(
+                f"📈 Tasdiqlangan yozuv yo'q. {waiting} ta qog'oz kundalik tasdiq kutmoqda: "
+                "rasmdagi xabarda Tasdiqlash tugmasini bosing, shunda hisoblanadi.",
+                [[do("📓 Kundalik holati", "/diary")]],
+            )
         return Reply(
             "📈 Hali kundalik yozuv yo'q. Statistika qog'oz kundalik rasmidan (yoki matnli kundalikdan) hisoblanadi.",
             [[do("📷 Rasm yuborish", "/photo")]],

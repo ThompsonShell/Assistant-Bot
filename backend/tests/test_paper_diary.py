@@ -125,6 +125,7 @@ def test_complete_page_shows_summary_with_four_buttons(db, photo_dir):
     assert f"Qog'oz kundalik — {iso()}" in r.text and "(rasmdan o'qildi)" in r.text
     assert "Python 90" in r.text and "AI-off: 120" in r.text and "Jami: 2 s 45 d" in r.text
     assert "list comprehension" in r.text and "OOP part 2" in r.text
+    assert "So'zlar: abide - rioya qilmoq · abandon - tashlab ketmoq" in r.text   # lines stay apart
     assert "statistikaga qo'shilmaydi" in r.text
 
     entry = db.query(PaperEntry).one()

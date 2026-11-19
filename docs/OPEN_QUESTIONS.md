@@ -1,7 +1,30 @@
 # Ochiq savollar (Phase 0, reja v2 bo'yicha yangilangan)
 
 Sana: 2026-11-19. Har bir savolga mening tavsiyam bor; "ha" desangiz ham bo'ladi.
-Phase 1 kodidan oldin **A guruhi** (Q1-Q6) va **Q15, Q19** javob olishi kerak.
+Phase 1 kodi yozildi (pastdagi "Holat" jadvaliga qarang). Ochiq savollar shu faylda qoldi.
+
+## Holat (2026-11-19, amalga oshirilgandan keyin)
+
+Siz Phase 0 ni tasdiqlash o'rniga to'g'ridan-to'g'ri amalga oshirishni buyurdingiz, shuning uchun quyidagilar qilindi. Savollarning o'zi o'chirilmadi, pastda holati bilan turibdi.
+
+| Savol | Holat |
+|---|---|
+| Q2 buyruq nomlari | Hech qaysi eski buyruq olib tashlanmadi. `/cards`, `/addword`, `/exam` aliaslari **qo'shilmadi**. Kerak bo'lsa ayting |
+| Q4 `/diary` | Qilindi: `/diary` = bugungi ro'yxat (input, output, so'zlar, rasm). Eski ko'rinish: `/diary show`, `/diary week`. 7 qadamli matn oqimi **hali yo'q**, o'rniga `/learned` va `/recall` |
+| Q15 rasmni Claude'ga berish | Kod yozildi (API va CLI yo'llari), **CLI yo'li haqiqiy loginda hali sinalmagan**. 10 daqiqalik sinov hamon kerak |
+| Q16 rasm saqlash | Qilindi: `data/diary_photos/`, gitignore, 600 ruxsat |
+| Q17 sana | Qilindi: izoh > `/date` > sahifa > bugun, 48 soat, "Sana noto'g'ri" tugmasi |
+| Q18 matplotlib | Qo'shilmadi (Phase 7) |
+| Q19 Phase 1 hajmi | Siz hammasini birdan so'radingiz, shuning uchun 1a va 1b birga qilindi |
+| Q1, Q3, Q5, Q6, Q7-Q14 | **Ochiq**. Eng muhimi: Q1 (repo hamon public; rasmlar gitga tushmaydi, lekin `docs/` va kelajakdagi fayllar ochiq bo'ladi), Q5 (eslatmalar endi kuniga 8 tagacha), Q6 (`DISPLAY_TIMEZONE`) |
+
+Yangi savollar:
+
+**Q20. "Faol kun" ta'rifi.** Hozir faol kun = tasdiqlangan qog'oz yozuv YOKI matnli kundalikda input/output bor. Matnli kun daqiqa qo'shmaydi, lekin ketma-ketlik va barqarorlikka kiradi. Faqat qog'ozni hisoblash kerakmi?
+
+**Q21. "So'zlar 3 ta" qoidasi.** Kun to'liq hisoblanishi uchun input + output + 3 ta yangi so'z kerak (shablondagi "3 WORDS"). Rejada kuniga 8-10 yangi karta ko'rsatilgan. 3 ta yetarlimi?
+
+**Q22. Yil oynasi.** `/stats yil` 2026-11-20 dan boshlab 365 kunlik oyna. "Kalendar yili" varianti `/settings` bilan keladi, u hali yo'q.
 
 ## A. Phase 1 dan oldin kerak
 
