@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     study_quiz_hour: int = 19
     # Article reading: Monday vocab text, Friday technical article, Sunday space article.
     study_reading_hour: int = 18
+    # Paper diary photos: private local folder (gitignored) and the backfill window.
+    diary_photo_dir: str = "data/diary_photos"
+    diary_backfill_hours: int = 48
     # Feeds searched for the Friday technical article (comma-separated RSS/Atom URLs).
     reading_tech_feeds: str = "https://realpython.com/atom.xml"
 

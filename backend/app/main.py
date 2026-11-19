@@ -135,16 +135,18 @@ def _start_scheduler(app: FastAPI, session_local: sessionmaker) -> None:
             h.strip() for h in settings.study_review_hours.split(",") if h.strip().isdigit()
         )
         study_jobs = [
-            ("study_diary", sr.remind_diary, str(settings.study_diary_hour)),
-            ("study_quiz", sr.remind_quiz, str(settings.study_quiz_hour)),
-            ("study_reading", sr.remind_reading, str(settings.study_reading_hour)),
+            ("study_diary", sr.remind_diary, str(settings.study_diary_hour), 0),
+            ("study_quiz", sr.remind_quiz, str(settings.study_quiz_hour), 0),
+            ("study_reading", sr.remind_reading, str(settings.study_reading_hour), 0),
+            # Ten minutes after the morning brief: ask once about unconfirmed paper entries.
+            ("study_unconfirmed", sr.remind_unconfirmed, str(settings.morning_brief_hour), 10),
         ]
         if hours:
-            study_jobs.append(("study_review", sr.remind_review, hours))
-        for job_id, func, hour in study_jobs:
+            study_jobs.append(("study_review", sr.remind_review, hours, 0))
+        for job_id, func, hour, minute in study_jobs:
             scheduler.add_job(
                 lambda f=func: f(session_local),
-                CronTrigger(hour=hour, minute=0, timezone=tz),
+                CronTrigger(hour=hour, minute=minute, timezone=tz),
                 id=job_id,
                 max_instances=1,
                 coalesce=True,

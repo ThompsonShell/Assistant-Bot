@@ -48,6 +48,30 @@ class ClaudeApiProvider:
             b.text for b in resp.content if getattr(b, "type", None) == "text"
         ).strip()
 
+    def vision(self, prompt: str, image_path: str, *, system: str | None = None) -> str:
+        """Ask Claude about an image file (JPEG/PNG/WebP). Raises on API errors."""
+        import base64
+        import mimetypes
+        from pathlib import Path
+
+        media = mimetypes.guess_type(image_path)[0] or "image/jpeg"
+        data = base64.standard_b64encode(Path(image_path).read_bytes()).decode()
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": 2000,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        }
+        if system:
+            kwargs["system"] = system
+        resp = self._client.messages.create(**kwargs)
+        return "".join(b.text for b in resp.content if getattr(b, "type", None) == "text").strip()
+
     def chat(
         self, prompt: str, *, system: str | None = None, history: list[dict] | None = None
     ) -> str:

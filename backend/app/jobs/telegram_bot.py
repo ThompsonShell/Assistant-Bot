@@ -22,7 +22,7 @@ from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
-from ..bot import flows, registry, state as bot_state, views
+from ..bot import flows, paper_flow, registry, state as bot_state, views
 from ..bot.ui import Reply, do
 from ..models.study import VocabCard
 from ..providers import get_provider
@@ -223,6 +223,18 @@ def process_callback(http, session_local, cb: dict, provider=None) -> None:
         _handle_owner_text(http, session_local, provider, chat_id, data[3:])
         return
     parts = data.split(":")
+    if parts[0] == "pe":  # paper diary buttons
+        with session_local() as db:
+            reply = paper_flow.on_callback(db, parts)
+            if reply is not None:
+                reply.with_next(views.best_next(db))
+        if reply is not None:
+            _tg(http, "editMessageReplyMarkup", {
+                "chat_id": chat_id, "message_id": message_id,
+                "reply_markup": {"inline_keyboard": []},   # a tapped button can't be tapped twice
+            })
+            send_message(http, chat_id, reply.text, reply_markup=reply.markup())
+        return
     if parts[0] != "rv" or len(parts) < 2:
         return
     with session_local() as db:
@@ -458,6 +470,9 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
             return views.photo_help()
         if cmd == "/diary" and len(t.split()) == 1:
             return views.diary_checklist(db)
+        paper_reply = paper_flow.command(db, cmd, t)  # /date, /delete_entry
+        if paper_reply is not None:
+            return paper_reply.with_next(views.best_next(db, skip=cmd))
         if len(t.split()) == 1:  # bare command: ask one question
             started = flows.start(db, cmd)
             if started is not None:
@@ -465,6 +480,10 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
         body = handle_text(db, provider, t, history)
         reply = Reply(body).with_next(views.empty_state_button(cmd, body))
         return reply.with_next(views.best_next(db, skip=cmd))
+
+    st = bot_state.get_state(db)
+    if st and st[0].startswith("paper:"):  # answering a paper-diary question
+        return paper_flow.answer(db, st, t).with_next(views.best_next(db))
 
     pending = flows.pending_command(db)
     if pending:
@@ -653,6 +672,52 @@ def _effort_text(text: str) -> str:
     return f"✅ Effort o'rnatildi: {level}"
 
 
+MAX_PHOTO_BYTES = 10_000_000
+_DOC_SUFFIX = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+
+
+def _photo_of(msg: dict) -> tuple[str, str] | None:
+    """(file_id, suffix) of the photo in a message, or None. Telegram sends a
+    photo in several sizes; the largest is used. Images sent as a file count too."""
+    sizes = msg.get("photo")
+    if sizes:
+        best = max(sizes, key=lambda p: p.get("file_size") or (p.get("width", 0) * p.get("height", 0)))
+        return best["file_id"], ".jpg"
+    doc = msg.get("document") or {}
+    if doc.get("mime_type") in _DOC_SUFFIX:
+        return doc["file_id"], _DOC_SUFFIX[doc["mime_type"]]
+    return None
+
+
+def _download_file(http: httpx.Client, file_id: str) -> bytes:
+    """Download a file the owner sent (size-limited)."""
+    info = http.get(_api("getFile"), params={"file_id": file_id}).json()["result"]
+    if (info.get("file_size") or 0) > MAX_PHOTO_BYTES:
+        raise ValueError("file too large")
+    resp = http.get(f"https://api.telegram.org/file/bot{settings.telegram_bot_token}/{info['file_path']}")
+    data = resp.content
+    if len(data) > MAX_PHOTO_BYTES:
+        raise ValueError("file too large")
+    return data
+
+
+def _handle_owner_photo(http, session_local, provider, chat_id: Any, msg: dict, photo: tuple[str, str]) -> None:
+    """Paper diary: download the photo, let the bot read it, show what it understood."""
+    file_id, suffix = photo
+    send_message(http, chat_id, "📷 Rasm qabul qilindi, o'qiyapman… (bir necha soniya)")
+    try:
+        data = _download_file(http, file_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("photo download failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+        send_message(http, chat_id, "Rasmni yuklab bo'lmadi (10 MB dan kichik bo'lsin). Qayta yuboring.")
+        return
+    with session_local() as db:
+        bot_state.clear_state(db)
+        reply = paper_flow.handle_photo(db, provider, data, msg.get("caption") or "", suffix)
+        reply.with_next(views.best_next(db, skip="/photo"))
+    send_message(http, chat_id, reply.text, reply_markup=reply.markup())
+
+
 def _handle_owner_text(http, session_local, provider, chat_id: Any, text: str) -> None:
     """Run one owner message (typed, or a ``do:`` button) and send the answer."""
     parts = text.strip().lower().split()
@@ -706,6 +771,10 @@ def process_update(http, session_local, provider, update: dict) -> None:
         if chat_id is not None:
             send_message(http, chat_id, "⛔ Bu shaxsiy bot — faqat egasi uchun.")
         logger.info("rejected non-owner chat", extra={"extra_fields": {"chat_id": chat_id}})
+        return
+    photo = _photo_of(msg) if "message" in update else None  # edits don't re-send photos
+    if photo is not None:
+        _handle_owner_photo(http, session_local, provider, chat_id, msg, photo)
         return
     if not text:
         return

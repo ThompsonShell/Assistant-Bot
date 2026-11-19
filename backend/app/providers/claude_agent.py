@@ -46,7 +46,9 @@ class ClaudeAgentProvider:
         self._bin = _resolve_bin()
         self._effort = settings.claude_effort if settings.claude_effort in self._EFFORTS else "medium"
 
-    def _run(self, system: str, prompt: str, *, timeout: int = 120) -> str:
+    def _run(
+        self, system: str, prompt: str, *, timeout: int = 120, tools: str = "", cwd: str | None = None
+    ) -> str:
         # Child env: drop API-key/vars so the subscription login is used.
         env = {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
         env.pop("CLAUDE_CODE_SIMPLE", None)
@@ -63,11 +65,13 @@ class ClaudeAgentProvider:
             cmd = [
                 self._bin, "-p",
                 "--output-format", "json",
-                "--tools", "",
+                "--tools", tools,
                 "--no-session-persistence",
                 "--effort", get_effort(self._effort),
                 "--system-prompt-file", spf,
             ]
+            if tools:  # e.g. "Read" for image input; everything else stays disabled
+                cmd += ["--allowedTools", tools]
             if self._model:
                 cmd += ["--model", self._model]
             try:
@@ -78,6 +82,7 @@ class ClaudeAgentProvider:
                     stderr=subprocess.PIPE,
                     env=env,
                     timeout=timeout,
+                    cwd=cwd,
                 )
             except FileNotFoundError:
                 raise RuntimeError(f"`claude` binary not found at {self._bin!r}")
@@ -117,6 +122,25 @@ class ClaudeAgentProvider:
         except Exception as exc:  # noqa: BLE001
             logger.warning("claude cli error", extra={"extra_fields": {"error": str(exc)[:200]}})
             return f"⚠️ Claude (obuna) xatosi: {str(exc)[:160]}"
+
+    def vision(self, prompt: str, image_path: str, *, system: Optional[str] = None) -> str:
+        """Read an image by letting the CLI use ONLY its Read tool on a private
+        temporary copy of the file.
+
+        UNVERIFIED: this route has not been tested against a real subscription
+        login (see docs/OPEN_QUESTIONS.md Q15). Callers must handle RuntimeError.
+        """
+        src = Path(image_path)
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = Path(tmp) / f"page{src.suffix or '.jpg'}"
+            shutil.copyfile(src, dst)
+            return self._run(
+                system or "",
+                f"Read the image file ./{dst.name} and follow the instructions.\n\n{prompt}",
+                timeout=180,
+                tools="Read",
+                cwd=tmp,
+            )
 
     def summarize(self, text: str, *, context: Optional[dict] = None) -> str:
         return self.chat(f"Summarize briefly:\n\n{text}")

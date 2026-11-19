@@ -32,3 +32,6 @@ claude_runtime.json
 
 # Channel watch state (per-machine)
 channel_state.json
+
+# Private study data (diary photos etc.) - never commit
+data/

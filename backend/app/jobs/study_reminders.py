@@ -111,3 +111,38 @@ def remind_reading(session_local, http: httpx.Client | None = None) -> bool:
         ), None
 
     return _run(session_local, http, build)
+
+
+def remind_unconfirmed(session_local, http: httpx.Client | None = None) -> int:
+    """Next morning: show each paper entry still waiting for confirmation, once.
+
+    Returns how many were sent. An entry is marked as asked before sending, so a
+    failure can never turn into repeated messages.
+    """
+    if not (settings.telegram_bot_token and settings.telegram_chat_id and settings.study_enabled):
+        return 0
+    from ..bot import paper_flow
+    from ..study import paper
+    from .telegram_bot import send_message
+
+    with session_local() as db:
+        entries = paper.unconfirmed_before(db, study.local_today())
+        replies = [paper_flow.summary_reply(e, "(tasdiqlanmagan)") for e in entries]
+        for e in entries:
+            e.reminded = True
+        db.commit()
+    if not replies:
+        return 0
+
+    own = http is None
+    client = http or httpx.Client(timeout=30)
+    try:
+        for reply in replies:
+            send_message(client, settings.telegram_chat_id,
+                         "📷 Tasdiqlanmagan kundalik:\n\n" + reply.text, reply_markup=reply.markup())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("unconfirmed reminder failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+    finally:
+        if own:
+            client.close()
+    return len(replies)
