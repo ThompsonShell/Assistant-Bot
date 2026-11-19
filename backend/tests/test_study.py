@@ -263,8 +263,21 @@ def test_callbacks_from_strangers_are_ignored(monkeypatch):
 
 def test_review_when_nothing_due(monkeypatch):
     monkeypatch.setattr(settings, "telegram_chat_id", "999")
+    sm = _sm()
     http = Http()
-    tb.process_update(http, _sm(), NoAI(), {"message": {"chat": {"id": 999}, "text": "/review"}})
+
+    # No cards at all: say so and offer the button that fixes it.
+    tb.process_update(http, sm, NoAI(), {"message": {"chat": {"id": 999}, "text": "/review"}})
+    _, payload = http.calls[-1]
+    assert "Hali so'z yo'q" in payload["text"]
+    assert payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "do:/word"
+
+    # Cards exist but none is due today: the session is finished.
+    with sm() as db:
+        study.add_words(db, "abide - rioya qilmoq")
+        card = db.query(VocabCard).one()
+        study.rate_card(db, card.id, "good")
+    tb.process_update(http, sm, NoAI(), {"message": {"chat": {"id": 999}, "text": "/review"}})
     assert "tugadi" in http.calls[-1][1]["text"]
 
 

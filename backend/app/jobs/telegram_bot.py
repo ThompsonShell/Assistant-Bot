@@ -22,6 +22,8 @@ from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
+from ..bot import flows, registry, state as bot_state, views
+from ..bot.ui import Reply, do
 from ..models.study import VocabCard
 from ..providers import get_provider
 from ..study import reading, service as study
@@ -90,38 +92,10 @@ def _api(method: str) -> str:
     return f"https://api.telegram.org/bot{settings.telegram_bot_token}/{method}"
 
 
-BOT_COMMANDS = [
-    {"command": "today", "description": "Bugungi GitHub faoliyati"},
-    {"command": "week", "description": "Haftalik statistika"},
-    {"command": "github", "description": "Oxirgi hodisalar"},
-    {"command": "repos", "description": "Kuzatilayotgan repolar"},
-    {"command": "plan", "description": "AI reja tuzish (saqlaydi)"},
-    {"command": "tasks", "description": "Vazifalar ro'yxati"},
-    {"command": "done", "description": "Vazifa bajarildi"},
-    {"command": "jira", "description": "Menga tayinlangan Jira issue'lar"},
-    {"command": "news", "description": "Dunyo texnologiya yangiliklari"},
-    {"command": "channels", "description": "Kuzatilayotgan kanallar"},
-    {"command": "weather", "description": "Ob-havo va kiyim tavsiyasi"},
-    {"command": "word", "description": "So'z qo'shish: so'z - ma'no"},
-    {"command": "review", "description": "So'z takrorlash"},
-    {"command": "learned", "description": "Bugun nimani o'rgandim"},
-    {"command": "recall", "description": "Yodimdan yozish (output)"},
-    {"command": "diary", "description": "Kundalik"},
-    {"command": "quiz", "description": "Imtihon"},
-    {"command": "drill", "description": "Qo'lda kod mashqi"},
-    {"command": "read", "description": "Bugungi maqola"},
-    {"command": "summary", "description": "Maqola xulosasi (ingliz tilida)"},
-    {"command": "topic", "description": "Haftalik mavzu"},
-    {"command": "effort", "description": "Claude chuqurligi"},
-    {"command": "help", "description": "Yordam"},
-]
-
-# Persistent quick-tap buttons shown after /start.
+# One persistent button next to the text box; it opens the inline main menu.
+MENU_BUTTON_TEXT = "🏠 Menyu"
 MAIN_KEYBOARD = {
-    "keyboard": [
-        [{"text": "/tasks"}, {"text": "/today"}],
-        [{"text": "/plan "}, {"text": "/help"}],
-    ],
+    "keyboard": [[{"text": MENU_BUTTON_TEXT}]],
     "resize_keyboard": True,
 }
 
@@ -218,7 +192,11 @@ def send_review_card(http: httpx.Client, chat_id: Any, db, exclude_id: int | Non
     today = study.local_today()
     card = study.next_card(db, today, exclude_id)
     if card is None:
-        send_message(http, chat_id, "🎉 Bugunlik takrorlash tugadi! Yangi so'z: /word")
+        if db.query(VocabCard).count() == 0:
+            reply = Reply("📚 Hali so'z yo'q.", [[do("➕ So'z qo'shish", "/word")]])
+        else:
+            reply = Reply("🎉 Bugunlik takrorlash tugadi!").with_next(views.best_next(db, skip="/review"))
+        send_message(http, chat_id, reply.text, reply_markup=reply.markup())
         return False
     waiting = len(study.due_cards(db, today))
     send_message(
@@ -228,8 +206,11 @@ def send_review_card(http: httpx.Client, chat_id: Any, db, exclude_id: int | Non
     return True
 
 
-def process_callback(http, session_local, cb: dict) -> None:
-    """Handle a tap on a review button (owner only)."""
+def process_callback(http, session_local, cb: dict, provider=None) -> None:
+    """Handle a tap on an inline button (owner only).
+
+    ``do:<command>`` runs the command as if it had been typed; ``rv:`` buttons
+    drive the vocabulary review."""
     msg = cb.get("message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
     message_id = msg.get("message_id")
@@ -237,7 +218,11 @@ def process_callback(http, session_local, cb: dict) -> None:
     if str(chat_id) != str(settings.telegram_chat_id):
         return
 
-    parts = (cb.get("data") or "").split(":")
+    data = cb.get("data") or ""
+    if data.startswith("do:"):
+        _handle_owner_text(http, session_local, provider, chat_id, data[3:])
+        return
+    parts = data.split(":")
     if parts[0] != "rv" or len(parts) < 2:
         return
     with session_local() as db:
@@ -266,7 +251,7 @@ def process_callback(http, session_local, cb: dict) -> None:
 def set_bot_commands(http: httpx.Client) -> None:
     """Register the "/" menu of commands with Telegram."""
     try:
-        http.post(_api("setMyCommands"), json={"commands": BOT_COMMANDS})
+        http.post(_api("setMyCommands"), json={"commands": registry.telegram_menu()})
     except Exception as exc:  # noqa: BLE001
         logger.warning("setMyCommands failed", extra={"extra_fields": {"error": str(exc)[:200]}})
 
@@ -441,6 +426,47 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
     if t.startswith("/"):
         return "Noma'lum buyruq. /help ni bosing."
     return provider.chat(t, system=SYSTEM_PROMPT, history=history)
+
+
+def handle_message(db, provider, text: str, history: list[dict] | None = None) -> Reply:
+    """What the owner sees for a message: text plus buttons.
+
+    Wraps :func:`handle_text` (which stays the one-message router) and adds
+    the guided flows, the menu screens, empty-state buttons and the single
+    best next action under every reply.
+    """
+    t = (text or "").strip()
+    if t == MENU_BUTTON_TEXT or t.lower() in ("start", "help", "menu"):
+        t = "/menu"
+
+    if t.startswith("/"):
+        cmd = t.split()[0].lower().split("@")[0]
+        if cmd == "/cancel":
+            had = bot_state.clear_state(db)
+            return Reply(
+                "❌ Bekor qilindi." if had else "Bekor qilinadigan narsa yo'q.",
+                [[do("🏠 Menyu", "/menu")]],
+            )
+        bot_state.clear_state(db)  # a new command drops any pending question
+        if cmd in ("/start", "/menu", "/help"):
+            return views.main_menu(db)
+        if cmd == "/more":
+            return views.more_screen()
+        if cmd == "/bugun":
+            return views.today_view(db)
+        if len(t.split()) == 1:  # bare command: ask one question
+            started = flows.start(db, cmd)
+            if started is not None:
+                return started
+        body = handle_text(db, provider, t, history)
+        reply = Reply(body).with_next(views.empty_state_button(cmd, body))
+        return reply.with_next(views.best_next(db, skip=cmd))
+
+    pending = flows.pending_command(db)
+    if pending:
+        reply = flows.answer(db, pending, t, lambda line: handle_text(db, provider, line, history))
+        return reply.with_next(views.best_next(db, skip=pending))
+    return Reply(handle_text(db, provider, t, history)).with_next(views.best_next(db))
 
 
 def _plan_and_save(db, provider, text: str) -> str:
@@ -623,11 +649,47 @@ def _effort_text(text: str) -> str:
     return f"✅ Effort o'rnatildi: {level}"
 
 
+def _handle_owner_text(http, session_local, provider, chat_id: Any, text: str) -> None:
+    """Run one owner message (typed, or a ``do:`` button) and send the answer."""
+    parts = text.strip().lower().split()
+    cmd = parts[0] if parts else ""
+
+    if cmd == "/start":  # set the persistent menu button, then show the menu
+        send_message(http, chat_id, "👋 Salom! Pastdagi 🏠 Menyu tugmasi har doim shu yerda.",
+                     reply_markup=MAIN_KEYBOARD)
+
+    if cmd == "/review":
+        with session_local() as db:
+            bot_state.clear_state(db)
+            send_review_card(http, chat_id, db)
+        return
+
+    if cmd == "/news":
+        # News goes out as separate photo cards, not one text reply.
+        with session_local() as db:
+            bot_state.clear_state(db)
+        topic = "space" if len(parts) > 1 and parts[1] in ("space", "kosmos") else "tech"
+        if not settings.news_enabled:
+            send_message(http, chat_id, _news_text(topic))
+            return
+        heading = "🚀 Kosmos yangiliklari" if topic == "space" else "🌍 Texnologiya yangiliklari"
+        try:
+            send_news_cards(http, chat_id, limit=5, heading=heading, topic=topic)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("news cards failed", extra={"extra_fields": {"error": str(exc)[:200]}})
+            send_message(http, chat_id, "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring.")
+        return
+
+    with session_local() as db:
+        reply = handle_message(db, provider, text)
+    send_message(http, chat_id, reply.text, reply_markup=reply.markup())
+
+
 def process_update(http, session_local, provider, update: dict) -> None:
-    """Handle one Telegram update: reject non-owner chats, route the text
-    through :func:`handle_text`, and reply (with the main keyboard on /start)."""
+    """Handle one Telegram update: reject non-owner chats, then route button
+    taps and text through the bot's guided-conversation layer."""
     if update.get("callback_query"):
-        process_callback(http, session_local, update["callback_query"])
+        process_callback(http, session_local, update["callback_query"], provider)
         return
 
     msg = update.get("message") or update.get("edited_message") or {}
@@ -643,31 +705,7 @@ def process_update(http, session_local, provider, update: dict) -> None:
         return
     if not text:
         return
-
-    if text.strip().lower().split()[:1] == ["/review"]:
-        with session_local() as db:
-            send_review_card(http, chat_id, db)
-        return
-
-    news_parts = text.strip().lower().split()
-    if news_parts and news_parts[0] == "/news":
-        # News goes out as separate photo cards, not one text reply.
-        topic = "space" if len(news_parts) > 1 and news_parts[1] in ("space", "kosmos") else "tech"
-        if not settings.news_enabled:
-            send_message(http, chat_id, _news_text(topic))
-            return
-        heading = "🚀 Kosmos yangiliklari" if topic == "space" else "🌍 Texnologiya yangiliklari"
-        try:
-            send_news_cards(http, chat_id, limit=5, heading=heading, topic=topic)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("news cards failed", extra={"extra_fields": {"error": str(exc)[:200]}})
-            send_message(http, chat_id, "🌍 Yangiliklarni olib bo'lmadi. Keyinroq urinib ko'ring.")
-        return
-
-    with session_local() as db:
-        reply = handle_text(db, provider, text)
-    markup = MAIN_KEYBOARD if text.strip().lower() in ("/start", "start") else None
-    send_message(http, chat_id, reply, reply_markup=markup)
+    _handle_owner_text(http, session_local, provider, chat_id, text)
 
 
 def run_bot(
