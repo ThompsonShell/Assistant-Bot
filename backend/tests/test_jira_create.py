@@ -35,6 +35,7 @@ class FakeJira:
         ]
         self.create_status = 201
         self.create_body = {"key": "PRJ-7"}
+        self.create_script = []           # per-POST (status, body); used before the defaults
         self.myself_status = 200
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -50,6 +51,9 @@ class FakeJira:
         if path.startswith("/rest/api/3/project/"):
             return httpx.Response(200, json={"issueTypes": self.issue_types})
         if path == "/rest/api/3/issue" and request.method == "POST":
+            if self.create_script:
+                status, body = self.create_script.pop(0)
+                return httpx.Response(status, json=body)
             return httpx.Response(self.create_status, json=self.create_body)
         if path == "/rest/api/3/search/jql":
             return httpx.Response(200, json={"issues": [
@@ -190,16 +194,25 @@ def test_parse_task():
 
 
 @pytest.mark.parametrize("text,expected", [
-    ("Jira ga task qo'sh: testlar yozish", "testlar yozish"),
-    ("jiraga yangi task yarat: README  ertaga", "README  ertaga"),
-    ("Jira'ga vazifa qo‘sh: SQL JOIN", "SQL JOIN"),               # typographic apostrophe
-    ("Jira ga task qo'sh", ""),                                    # no title: the bot asks
-    ("Jira ga issue qo'sh:", ""),
-    ("Add a Jira task: fix bug", "fix bug"),
+    ("Jira ga task qo'sh: testlar yozish", ("add", "testlar yozish")),
+    ("jiraga yangi task yarat: README  ertaga", ("add", "README  ertaga")),
+    ("Jira'ga vazifa qo‘sh: SQL JOIN", ("add", "SQL JOIN")),        # typographic apostrophe
+    ("Jira ga task qo'sh", ("add", "")),                             # no title: the bot asks
+    ("Jira ga issue qo'sh:", ("add", "")),
+    ("Add a Jira task: fix bug", ("add", "fix bug")),
+    ("Jira ga task qo'sh:\nbirinchi\nikkinchi", ("add", "birinchi\nikkinchi")),
+    # The bot's own tasks are meant, not a new title:
+    ("Jira ga bugungi vazifalarni qo'sh", ("sync", "")),
+    ("barcha tasklarimni jira ga yubor", ("sync", "")),
+    # A reply that mentions Jira and says "add" is still a request (it used to fall through to Claude):
+    ("Men jirani ulaganman, qo'sh", ("add", "")),
+    # Not requests:
     ("jira nima o'zi", None),
-    ("Jira ga task qo'shsam bo'ladimi?", None),                    # a question, not a request
+    ("Jira ga task qo'shsam bo'ladimi?", None),                      # a question
+    ("Jira ga qo'shgan edim", None),                                 # past tense
+    ("Jira ga yuborganman", None),
     ("Bugun nima qilay", None),
-    ("task qo'sh: testlar", None),                                 # no mention of Jira
+    ("task qo'sh: testlar", None),                                   # no mention of Jira
     ("/jira add x", None),
 ])
 def test_intent(text, expected):
@@ -210,9 +223,9 @@ def test_intent(text, expected):
 
 def test_preview_comes_first_and_nothing_is_created_until_yaratish(db, fake):
     r = say(db, "/jira add Write tests ertaga #study")
-    assert "yangi task yaratilsinmi" in r.text and "PRJ" in r.text and "Write tests" in r.text
-    assert "#study" not in r.text.replace("Teglar: study", "") and "Teglar: study" in r.text
-    assert (study.local_today() + dt.timedelta(days=1)).isoformat() in r.text
+    assert "yangi task yaratilsinmi" in r.text and "PRJ" in r.text and "Nom: Write tests" in r.text
+    assert "🏷 study" in r.text and "#study" not in r.text
+    assert "⏰ " + (study.local_today() + dt.timedelta(days=1)).isoformat() in r.text
     assert cbs(r) == ["jc:ok", "jc:proj", "do:/cancel"]
     assert fake.posts() == []                                          # nothing yet
 
@@ -239,10 +252,10 @@ def test_missing_title_is_asked_then_previewed(db, fake):
     assert "Task nomi nima" in say(db, "/jira add").text
 
 
-def test_typing_in_the_preview_replaces_the_title(db, fake):
+def test_typing_in_the_preview_replaces_the_list(db, fake):
     say(db, "/jira add Birinchi nom 2026-12-01")
     r = say(db, "Ikkinchi nom")
-    assert "Nom: Ikkinchi nom" in r.text and "Muddat: 2026-12-01" in r.text    # date kept
+    assert "Nom: Ikkinchi nom" in r.text and "2026-12-01" not in r.text     # a new text is a new request
     r = say(db, "Uchinchi nom ertaga")
     assert "Nom: Uchinchi nom" in r.text and (study.local_today() + dt.timedelta(days=1)).isoformat() in r.text
     tap(db, "jc:ok")
@@ -378,3 +391,147 @@ def test_create_button_through_telegram_and_strangers_are_ignored(db, fake, monk
 
     tb.process_update(http, sm, NoAI(), button("jc:ok"))               # a second tap finds nothing to create
     assert len(fake.posts()) == 1
+
+
+# ── several tasks at once ─────────────────────────────────────────────
+
+def test_parse_items_lines_bullets_and_limit():
+    items = jira_flow.parse_items("- Write tests ertaga #study\n2. Read article; SQL JOIN 2026-12-01\n\n  \n")
+    assert [i["title"] for i in items] == ["Write tests", "Read article", "SQL JOIN"]
+    assert items[0]["labels"] == ["study"] and items[2]["due"] == "2026-12-01" and items[1]["due"] is None
+    assert jira_flow.parse_items("") == [] and jira_flow.parse_items("  \n ; ") == []
+    many = jira_flow.parse_items("\n".join(f"task {i}" for i in range(30)))
+    assert len(many) == jira_flow.MAX_ITEMS
+
+
+def test_several_lines_make_several_tasks(db, fake):
+    r = say(db, "/jira add\nWrite tests ertaga\nRead article #english\nSQL JOIN")
+    assert "3 ta task yaratilsinmi" in r.text
+    assert "1. Write tests · ⏰" in r.text and "2. Read article · 🏷 english" in r.text and "3. SQL JOIN" in r.text
+    assert fake.posts() == []
+
+    done = tap(db, "jc:ok")
+    assert [p[2]["fields"]["summary"] for p in fake.posts()] == ["Write tests", "Read article", "SQL JOIN"]
+    assert done.text.count("✅ Jira'da yaratildi") == 3 and "Write tests" in done.text
+    assert state.get_state(db) is None
+
+
+def test_a_multi_line_sentence_in_plain_words(db, fake):
+    r = say(db, "Jira ga bugungi tasklarni qo'sh:\nPython lecture\nIngliz tili lecture\nGitHub: 10 ta action")
+    assert "3 ta task yaratilsinmi" in r.text and "3. GitHub: 10 ta action" in r.text
+
+
+def test_when_one_of_several_fails_only_that_one_is_retried(db, fake):
+    say(db, "/jira add\nBirinchi\nIkkinchi\nUchinchi")
+    fake.create_script = [(201, {"key": "PRJ-1"}), (400, {"errors": {"summary": "bad"}}), (201, {"key": "PRJ-3"})]
+    r = tap(db, "jc:ok")
+    assert "PRJ-1" in r.text and "PRJ-3" in r.text and "Yaratilmadi: Ikkinchi" in r.text and "summary: bad" in r.text
+    assert state.get_state(db)[1]["items"][0]["title"] == "Ikkinchi" and len(state.get_state(db)[1]["items"]) == 1
+
+    fake.create_script = [(201, {"key": "PRJ-2"})]
+    assert "PRJ-2" in tap(db, "jc:ok").text
+    assert len(fake.posts()) == 4                                   # 3 first, then only the failed one
+    assert state.get_state(db) is None
+
+
+# ── sending the bot's own tasks ───────────────────────────────────────
+
+def _tasks(db):
+    from app.models.task import Task
+
+    today = study.local_today()
+    rows = [
+        Task(title="Today task", scheduled_date=today),
+        Task(title="Overdue task", scheduled_date=today - dt.timedelta(days=2)),
+        Task(title="Undated task"),
+        Task(title="Future task", scheduled_date=today + dt.timedelta(days=3)),
+        Task(title="Finished task", scheduled_date=today, status="done"),
+    ]
+    db.add_all(rows)
+    db.commit()
+    return rows
+
+
+def test_sync_sends_open_due_tasks_once(db, fake):
+    from app.models.task import JiraLink
+
+    _tasks(db)
+    r = say(db, "/jira sync")
+    assert "3 ta task yaratilsinmi" in r.text
+    for title in ("Today task", "Overdue task", "Undated task"):
+        assert title in r.text
+    assert "Future task" not in r.text and "Finished task" not in r.text
+    assert fake.posts() == []
+
+    done = tap(db, "jc:ok")
+    assert done.text.count("✅") == 3 and len(fake.posts()) == 3
+    assert db.query(JiraLink).count() == 3
+
+    again = say(db, "/jira sync")                                    # nothing new to send
+    assert "yuboriladigan vazifa yo'q" in again.text and "do:/plan" in cbs(again)
+    assert len(fake.posts()) == 3
+
+
+def test_sync_in_plain_words_and_with_a_new_task_in_between(db, fake):
+    _tasks(db)
+    say(db, "/jira sync")
+    tap(db, "jc:ok")
+    from app.models.task import Task
+
+    db.add(Task(title="New one", scheduled_date=study.local_today()))
+    db.commit()
+    r = say(db, "Jira ga bugungi vazifalarni qo'sh")
+    assert "Nom: New one" in r.text and "Today task" not in r.text   # only the new task
+
+
+def test_a_failed_sync_item_is_not_marked_as_sent(db, fake):
+    from app.models.task import JiraLink
+
+    _tasks(db)
+    say(db, "/jira sync")
+    fake.create_script = [(201, {"key": "PRJ-1"}), (403, {}), (201, {"key": "PRJ-3"})]
+    tap(db, "jc:ok")
+    assert db.query(JiraLink).count() == 2
+    # Order is overdue, today, undated: the 2nd one ("Today task") failed and is the only one offered again.
+    r = say(db, "/jira sync")
+    assert "Nom: Today task" in r.text and "Overdue task" not in r.text and "Undated task" not in r.text
+
+
+def test_sync_when_jira_is_not_connected(db, monkeypatch):
+    monkeypatch.setattr(settings, "jira_api_token", None)
+    _tasks(db)
+    assert "JIRA_API_TOKEN" in say(db, "/jira sync").text
+    assert "JIRA_API_TOKEN" in say(db, "Jira ga bugungi vazifalarni qo'sh").text
+
+
+def test_links_live_in_their_own_table_so_old_databases_keep_working():
+    from app.models.task import Task
+
+    assert "jira_key" not in Task.__table__.columns                 # tasks is never altered
+
+
+# ── what Claude is told ───────────────────────────────────────────────
+
+def test_claude_is_told_the_real_jira_state_and_the_commands(db, fake, monkeypatch):
+    from app.bot import memory
+
+    prompt = memory.system_prompt(db, "BASE")
+    assert "Jira is CONNECTED" in prompt and "/jira add" in prompt and "/jira sync" in prompt
+    assert "never invent CSV imports" in prompt
+
+    monkeypatch.setattr(settings, "jira_email", None)
+    prompt = memory.system_prompt(db, "BASE")
+    assert "NOT connected (missing JIRA_EMAIL)" in prompt
+
+
+def test_the_message_that_used_to_reach_claude_now_reaches_the_jira_flow(db, fake):
+    class Claude:
+        ai_available = True
+        calls = 0
+
+        def chat(self, *a, **k):
+            Claude.calls += 1
+            return "Jira'ga ulanmaganman"
+
+    r = tb.handle_message(db, Claude(), "Men jirani ulaganman, qo'sh")
+    assert "Task nomi nima" in r.text and Claude.calls == 0         # asked for the title, no guessing

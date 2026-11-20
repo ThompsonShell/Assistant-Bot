@@ -530,9 +530,9 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
     if pending:
         reply = flows.answer(db, pending, t, lambda line: handle_text(db, provider, line, history))
         return reply.with_next(views.best_next(db, skip=pending))
-    task = jira_flow.intent(t)  # "Jira ga task qo'sh: ..." in plain words
-    if task is not None:
-        return jira_flow.from_text(db, task)
+    request = jira_flow.intent(t)  # "Jira ga task qo'sh: ..." in plain words
+    if request is not None:
+        return jira_flow.from_intent(db, request)
     fact = memory.intent_fact(t)  # "eslab qol: ..." in plain words
     if fact is not None:
         saved, why = memory.add_fact(db, fact)

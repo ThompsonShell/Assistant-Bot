@@ -139,11 +139,12 @@ Changed behaviour you may not expect: `/github` now defaults to **today** (`all`
 
 Reads freely, **creates only after a preview and a tap on "Yaratish"**; it never edits, moves or deletes.
 
+- Several tasks per request (one per line or `;`, max 10, one preview, one tap). `/jira sync` and "Jira ga bugungi vazifalarni qo'sh" send the bot's own open tasks from `/tasks`; each is remembered in `jira_links` (a separate table, because tables are only created at startup, never altered, so a new column on `tasks` would break older databases) and is never sent twice.
 - `/jira` lists my open issues; `/jira status` proves the connection (`/myself`); `/jira add <title> [ertaga|YYYY-MM-DD] [#label]` or plain words ("Jira ga task qo'sh: ...") show a preview (project, title, due date, labels) with [Yaratish] [Loyiha] [Bekor].
 - Project: `JIRA_PROJECT_KEY`, or chosen once from the account's projects with buttons and remembered (`study_kv`). Issue type: `JIRA_ISSUE_TYPE` (default Task) if the project has it, else the first ordinary type.
 - Errors are explained (401 wrong token, 403 no permission, 404 wrong URL or project, 400 the field Jira rejected). When a setting is empty, the bot names the missing variable (never its value).
 - `JIRA_BASE_URL` is tolerated with or without `https://`, with quotes, or with a pasted board URL.
-- Not yet done: import of the month-1 plan (OPEN_QUESTIONS Q10), editing and transitions.
+- Claude is told the real Jira state and these commands in its instructions (`memory.capabilities`). Not yet done: import of the month-1 plan (OPEN_QUESTIONS Q10), editing and transitions.
 
 ## 8a. Conversation memory (`app/bot/memory.py`)
 

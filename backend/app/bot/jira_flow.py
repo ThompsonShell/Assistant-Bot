@@ -1,11 +1,19 @@
-"""Creating a Jira task from Telegram: "/jira add <title>" or plain words like
-"Jira ga task qo'sh: testlar yozish".
+"""Creating Jira tasks from Telegram.
 
-Always a preview first: the bot shows project, type, title and due date and
-creates the issue only when the owner presses "Yaratish". Nothing else in Jira
-is ever changed.
+Ways in:
+  * ``/jira add <title>``, one task per line for several (also ``;``)
+  * plain words: "Jira ga task qo'sh: testlar yozish", "Jira ga bugungi
+    vazifalarni qo'sh" (that one sends the bot's own tasks, like /jira sync)
+  * ``/jira sync``: today's open tasks from /tasks that were not sent yet
 
-State: ``jira:title`` (waiting for a title), ``jira:confirm`` (preview shown).
+Always a preview first: the bot lists project, titles and due dates and creates
+the issues only when the owner presses "Yaratish". Nothing else in Jira is ever
+changed. A bot task that was sent is remembered (``jira_links``), so it is never
+sent twice.
+
+State: ``jira:title`` (waiting for a title), ``jira:confirm`` (preview shown),
+``jira:project`` (choosing a project). The pending request is
+``{"project", "items": [{"title", "due", "labels", "task_id"}]}``.
 Buttons: ``jc:ok`` create, ``jc:proj`` change project, ``jp:<KEY>`` pick one.
 """
 from __future__ import annotations
@@ -13,14 +21,15 @@ from __future__ import annotations
 import datetime as dt
 import re
 
-from ..config import settings
 from ..integrations import jira
+from ..models.task import JiraLink, Task
 from ..study import reading, service as study
 from . import runtime, state
 from .ui import Reply, do
 
 CANCEL = ("❌ Bekor qilish", "do:/cancel")
 _KV_PROJECT = "jira_project"
+MAX_ITEMS = 10  # one request never creates more than this
 
 
 # ── understanding the request ─────────────────────────────────────────
@@ -56,21 +65,46 @@ def parse_task(text: str) -> tuple[str, dt.date | None, list[str]]:
     return title, due, labels
 
 
+def parse_items(text: str) -> list[dict]:
+    """One task per non-empty line (or per ';'). Returns at most MAX_ITEMS."""
+    items = []
+    for chunk in re.split(r"[\n;]+", text or ""):
+        chunk = re.sub(r"^\s*(?:[-•*]|\d+[.)])\s+", "", chunk).strip()   # "- a", "1. a", "2) a"
+        title, due, labels = parse_task(chunk)
+        if title:
+            items.append({"title": title, "due": due.isoformat() if due else None,
+                          "labels": labels, "task_id": None})
+    return items[:MAX_ITEMS]
+
+
 _NORMAL = str.maketrans({"‘": "'", "’": "'", "ʻ": "'", "ʼ": "'", "`": "'"})
-_VERB = re.compile(r"(qo'sh|qosh|yarat|kirit|add\b|create\b|new task)", re.IGNORECASE)
+# Commands only ("qo'sh", "yubor"), not "qo'shgan edim" or "yuborganman": \b ends the word.
+_VERB = re.compile(
+    r"\b(qo'sh|qo'shib|qosh|yarat|yaratib|kirit|kiritib|yubor|yuborib|jo'nat|add|create|send|sync)\b",
+    re.IGNORECASE,
+)
+# "bugungi vazifalarni", "barcha tasklarim", "rejamni" ... = the bot's own tasks, not a new title.
+_OWN_TASKS = re.compile(r"bugungi|barcha|hamma|vazifalarim|tasklarim|rejam|vazifalarni|tasklarni", re.IGNORECASE)
 
 
-def intent(text: str) -> str | None:
-    """Does a plain message ask to add a Jira task? Returns the task text after
-    the colon ("" when there is none, so the bot asks), or None if it is not
-    such a request."""
+def intent(text: str) -> tuple[str, str] | None:
+    """Does a plain message ask to put tasks into Jira?
+
+    Returns ("add", text after the colon or "" to ask), ("sync", "") when it
+    means the bot's own tasks, or None when it is not such a request (questions,
+    chat about Jira, commands).
+    """
     t = (text or "").translate(_NORMAL)
     if t.lstrip().startswith("/") or "?" in t or not re.search(r"\bjira", t, re.IGNORECASE):
         return None
     head, sep, tail = t.partition(":")
-    if not _VERB.search(head) or not re.search(r"task|vazifa|issue|ticket|topshiriq", head, re.IGNORECASE):
+    if not _VERB.search(head):
         return None
-    return tail.strip() if sep else ""
+    if sep and tail.strip():
+        return ("add", tail.strip())
+    if _OWN_TASKS.search(head):
+        return ("sync", "")
+    return ("add", "")
 
 
 # ── project ───────────────────────────────────────────────────────────
@@ -80,9 +114,9 @@ def current_project(db) -> str | None:
 
 
 def _project_chosen(db, pending: dict, key: str) -> Reply:
-    """A project is known: continue the pending task, or just confirm the choice."""
+    """A project is known: continue the pending request, or just confirm the choice."""
     reading.set_kv(db, _KV_PROJECT, key)
-    if pending.get("title"):
+    if pending.get("items"):
         return preview(db, {**pending, "project": key})
     state.clear_state(db)
     return Reply(f"🗂 Loyiha: {key}. Endi: /jira add <nom>", [[do("➕ Task qo'shish", "/jira add")]])
@@ -106,11 +140,11 @@ def _project_picker(db, pending: dict) -> Reply:
 
 # ── preview and create ────────────────────────────────────────────────
 
-def start(db, title: str, due: dt.date | None, labels: list[str]) -> Reply:
-    """Begin a creation: configured? project known? then show the preview."""
+def start(db, items: list[dict]) -> Reply:
+    """Begin a request: configured? project known? then show the preview."""
     if not jira.is_configured():
         return not_configured()
-    pending = {"title": title, "due": due.isoformat() if due else None, "labels": labels}
+    pending = {"items": items}
     project = current_project(db)
     if not project:
         return _project_picker(db, pending)
@@ -119,17 +153,17 @@ def start(db, title: str, due: dt.date | None, labels: list[str]) -> Reply:
 
 def preview(db, pending: dict) -> Reply:
     state.set_state(db, "jira:confirm", pending)
+    items = pending["items"]
     lines = [
-        "📋 Jira'da yangi task yaratilsinmi?",
+        f"📋 Jira'da {len(items)} ta task yaratilsinmi?" if len(items) > 1 else "📋 Jira'da yangi task yaratilsinmi?",
         "",
         f"🗂 Loyiha: {pending['project']}",
-        f"📝 Nom: {pending['title']}",
     ]
-    if pending.get("due"):
-        lines.append(f"⏰ Muddat: {pending['due']}")
-    if pending.get("labels"):
-        lines.append("🏷 Teglar: " + ", ".join(pending["labels"]))
-    lines += ["", "Boshqa nom yozsangiz, nom almashadi."]
+    for i, it in enumerate(items, 1):
+        extra = (f" · ⏰ {it['due']}" if it.get("due") else "") + (
+            " · 🏷 " + ", ".join(it["labels"]) if it.get("labels") else "")
+        lines.append(f"{i}. {it['title']}{extra}" if len(items) > 1 else f"📝 Nom: {it['title']}{extra}")
+    lines += ["", "Boshqa matn yozsangiz, ro'yxat almashadi."]
     return Reply("\n".join(lines), [
         [("✅ Yaratish", "jc:ok"), ("🔁 Loyiha", "jc:proj")],
         [CANCEL],
@@ -154,47 +188,94 @@ def create(db) -> Reply:
     if not st or st[0] != "jira:confirm":
         return Reply("Bu so'rov eskirgan. Qayta yuboring: /jira add <nom>", [[do("➕ Task qo'shish", "/jira add")]])
     data = st[1]
-    try:
-        created = jira.create_issue(
-            data["project"], data["title"],
-            due=dt.date.fromisoformat(data["due"]) if data.get("due") else None,
-            labels=data.get("labels") or None,
-            description="Telegram bot orqali yaratildi.",
-        )
-    except jira.JiraError as exc:  # keep the preview so one tap retries
-        return Reply(f"❌ Yaratilmadi: {exc.user_message}", [[("🔁 Qayta urinish", "jc:ok"), ("🔁 Loyiha", "jc:proj")], [CANCEL]])
+    created: list[tuple[dict, jira.CreatedIssue]] = []
+    failed: list[tuple[dict, str]] = []
+    for item in data["items"]:
+        try:
+            issue = jira.create_issue(
+                data["project"], item["title"],
+                due=dt.date.fromisoformat(item["due"]) if item.get("due") else None,
+                labels=item.get("labels") or None,
+                description="Telegram bot orqali yaratildi.",
+            )
+        except jira.JiraError as exc:
+            failed.append((item, exc.user_message))
+            continue
+        created.append((item, issue))
+        if item.get("task_id"):  # remember it, so /jira sync never sends it again
+            db.merge(JiraLink(task_id=item["task_id"], jira_key=issue.key))
+            db.commit()
+
+    lines = [f"✅ Jira'da yaratildi: {issue.key} — {item['title']}\n{issue.url}" for item, issue in created]
+    if failed:
+        # Keep only what failed, so one tap retries just those.
+        state.set_state(db, "jira:confirm", {**data, "items": [item for item, _ in failed]})
+        lines += [f"❌ Yaratilmadi: {item['title']}\n   {why}" for item, why in failed]
+        return Reply("\n\n".join(lines), [[("🔁 Qayta urinish", "jc:ok"), ("🔁 Loyiha", "jc:proj")], [CANCEL]])
     state.clear_state(db)
-    return Reply(f"✅ Jira'da yaratildi: {created.key}\n{data['title']}\n{created.url}",
-                 [[do("📋 Mening issue'larim", "/jira")]])
+    return Reply("\n\n".join(lines), [[do("📋 Mening issue'larim", "/jira")]])
+
+
+# ── sending the bot's own tasks ───────────────────────────────────────
+
+def sync(db) -> Reply:
+    """Today's open bot tasks (and overdue or undated ones) that are not in Jira yet."""
+    if not jira.is_configured():
+        return not_configured()
+    today = study.local_today()
+    sent = {task_id for (task_id,) in db.query(JiraLink.task_id)}
+    tasks = (
+        db.query(Task)
+        .filter(Task.status != "done")
+        .filter((Task.scheduled_date <= today) | (Task.scheduled_date.is_(None)))
+        .order_by(Task.scheduled_date.is_(None), Task.scheduled_date, Task.id)
+        .all()
+    )
+    items = [
+        {"title": t.title, "due": t.scheduled_date.isoformat() if t.scheduled_date else None,
+         "labels": [], "task_id": t.id}
+        for t in tasks if t.id not in sent
+    ][:MAX_ITEMS]
+    if not items:
+        return Reply("📋 Jira'ga yuboriladigan vazifa yo'q (hammasi yuborilgan yoki hali reja yo'q).",
+                     [[do("📅 Reja tuzish", "/plan"), do("📋 Vazifalar", "/tasks")]])
+    return start(db, items)
 
 
 # ── commands, answers, buttons ────────────────────────────────────────
 
 def from_text(db, task_text: str) -> Reply:
-    """Start a task from the text after "add" or after the colon; ask for the
-    title when there is none."""
+    """Start from the text after "add" or after the colon; ask when there is none."""
     if not jira.is_configured():
         return not_configured()
     if not task_text.strip():
         state.set_state(db, "jira:title")
-        return Reply("📝 Task nomi nima? Oxirida muddat (ertaga yoki 2026-11-25) va #teg yozishingiz mumkin.", [[CANCEL]])
-    title, due, labels = parse_task(task_text)
-    return start(db, title, due, labels) if title else Reply("Task nomini yozing.", [[CANCEL]])
+        return Reply("📝 Task nomi nima? Bir nechta bo'lsa, har birini yangi qatordan yozing.\n"
+                     "Oxirida muddat (ertaga yoki 2026-11-25) va #teg yozishingiz mumkin.", [[CANCEL]])
+    items = parse_items(task_text)
+    return start(db, items) if items else Reply("Task nomini yozing.", [[CANCEL]])
+
+
+def from_intent(db, request: tuple[str, str]) -> Reply:
+    kind, text = request
+    return sync(db) if kind == "sync" else from_text(db, text)
 
 
 def command(db, text: str) -> Reply | None:
-    """/jira add <title>, /jira status, /jira project. None for a plain /jira."""
+    """/jira add <title>, /jira sync, /jira status, /jira project. None for a plain /jira."""
     parts = text.split(maxsplit=2)
     sub = parts[1].lower() if len(parts) > 1 else ""
     rest = parts[2].strip() if len(parts) > 2 else ""
     if sub == "add":
         return from_text(db, rest)
+    if sub == "sync":
+        return sync(db)
     if sub == "status":
         return status()
     if sub == "project":
         if not jira.is_configured():
             return not_configured()
-        return _project_picker(db, {"title": "", "due": None, "labels": []})
+        return _project_picker(db, {"items": []})
     return None
 
 
@@ -215,16 +296,14 @@ def status() -> Reply:
 
 
 def answer(db, st: tuple[str, dict], text: str) -> Reply:
-    """A typed message while the bot waits for a title or a changed title."""
+    """A typed message while the bot waits for a title, or to replace the list in the preview."""
     kind, data = st
-    title, due, labels = parse_task(text)
-    if not title:
+    items = parse_items(text)
+    if not items:
         return Reply("Task nomini yozing.", [[CANCEL]])
-    if kind == "jira:confirm":  # typing replaces the title, keeps project and date unless given
-        merged = {**data, "title": title, "due": due.isoformat() if due else data.get("due")}
-        merged["labels"] = labels or data.get("labels") or []
-        return preview(db, merged)
-    return start(db, title, due, labels)
+    if kind == "jira:confirm":
+        return preview(db, {**data, "items": items})
+    return start(db, items)
 
 
 def on_callback(db, parts: list[str]) -> Reply | None:
@@ -234,10 +313,8 @@ def on_callback(db, parts: list[str]) -> Reply | None:
             return create(db)
         if parts[1] == "proj":
             st = state.get_state(db)
-            pending = st[1] if st else {"title": "", "due": None, "labels": []}
-            return _project_picker(db, {k: pending.get(k) for k in ("title", "due", "labels")})
+            return _project_picker(db, {"items": st[1].get("items", []) if st else []})
     if parts[0] == "jp" and len(parts) > 1:
         st = state.get_state(db)
-        pending = {k: (st[1].get(k) if st else None) for k in ("title", "due", "labels")}
-        return _project_chosen(db, pending, parts[1].upper())
+        return _project_chosen(db, {"items": st[1].get("items", []) if st else []}, parts[1].upper())
     return None

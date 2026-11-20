@@ -3,6 +3,7 @@
 Newest first. One entry per feature or fix.
 
 ## 2026-11-20
+- **Jira requests no longer fall through to Claude:** "Men jirani ulaganman, qo'sh" and similar replies now start the Jira flow (questions and past tense such as "qo'shgan edim" do not). Several tasks at once (one per line or `;`, max 10), `/jira sync` and "Jira ga bugungi vazifalarni qo'sh" send the bot's own open tasks, each only once (`jira_links`, Alembic 0009). Claude is told the real Jira state and the commands, so it no longer says Jira is disconnected or invents a CSV import.
 - **Jira diagnostics:** `./scripts/check-jira.sh` checks the `.env` file (a later empty `JIRA_*` line erasing the real value, spaces around `=`, CRLF, lines that break `source`), what the program receives, one Jira call, and whether an old bot process is still running. Prints no secrets. The Jira messages now show the process id and start time.
 - **Memory:** the Telegram chat now remembers (last 16 messages shared with the dashboard chat, saved facts via `/remember` / `/memory` / `/forget`, today's date). Alembic 0008.
 - **Jira:** `/jira add`, `/jira status`, `/jira project`, and plain-words requests; preview then create; clear error reasons; missing settings are named. Fixed a bug where request headers were passed twice.

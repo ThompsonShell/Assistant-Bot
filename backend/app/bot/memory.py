@@ -89,11 +89,33 @@ def system_prompt(db, base: str) -> str:
             "What the owner asked you to remember (treat as true):\n"
             + "\n".join(f"- {f.text}" for f in facts)
         )
+    parts.append(capabilities())
     parts.append(
         "You can see the recent conversation. Use it and the facts above; never ask the "
         "owner to repeat something that is already there."
     )
     return "\n\n".join(parts)
+
+
+def capabilities() -> str:
+    """What the bot around Claude can really do, so Claude points to the right
+    command instead of guessing (it once told the owner Jira was not connected
+    and invented a CSV import while the bot could create Jira tasks)."""
+    from ..integrations import jira
+
+    missing = jira.missing_settings()
+    status = "CONNECTED" if not missing else "NOT connected (missing " + ", ".join(missing) + ")"
+    return (
+        "About the Telegram bot you live in (facts; do not contradict them):\n"
+        "- You cannot call tools or APIs yourself. The bot around you can, through commands.\n"
+        f"- Jira is {status}. The bot can create Jira tasks: /jira add <title> (several lines = "
+        "several tasks; optional end: ertaga, bugun or 2026-11-25, and #label), and /jira sync "
+        "sends today's bot tasks to Jira. /jira lists the owner's issues, /jira status checks the connection. "
+        "When the owner wants something added to Jira, give him that command. Do not say Jira "
+        "is disconnected unless the line above says so, and never invent CSV imports or other workarounds.\n"
+        "- Other commands: /plan (weekly plan), /tasks, /done, /word, /review, /quiz, /diary, "
+        "/stats, /read, /news, /remember, /menu."
+    )
 
 
 # ── commands ──────────────────────────────────────────────────────────

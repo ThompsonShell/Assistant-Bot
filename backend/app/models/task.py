@@ -32,3 +32,18 @@ class Task(Base):
     completed_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class JiraLink(Base):
+    """Which bot task was sent to which Jira issue (so a task is never sent twice).
+
+    A separate table on purpose: adding a column to the existing ``tasks`` table
+    would not reach databases created earlier (tables are only created, never
+    altered, at startup).
+    """
+
+    __tablename__ = "jira_links"
+
+    task_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jira_key: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
