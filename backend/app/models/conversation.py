@@ -21,3 +21,17 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class MemoryFact(Base):
+    """Something the owner asked the bot to remember (goals, level, schedule...).
+
+    Every fact is added to the assistant's instructions, so it never has to be
+    explained again in a new chat.
+    """
+
+    __tablename__ = "memory_facts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(String(400))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

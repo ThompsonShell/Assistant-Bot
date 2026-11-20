@@ -115,7 +115,7 @@ class ClaudeAgentProvider:
     ) -> str:
         full = prompt
         if history:
-            ctx = "\n".join(f"{h['role']}: {h['content']}" for h in history[-6:])
+            ctx = "\n".join(f"{h['role']}: {h['content'][:700]}" for h in history[-16:])
             full = f"Conversation so far:\n{ctx}\n\nUser: {prompt}"
         try:
             return self._run(system or "You are a helpful assistant.", full)

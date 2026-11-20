@@ -22,7 +22,7 @@ from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
-from ..bot import flows, paper_flow, registry, state as bot_state, views
+from ..bot import flows, memory, paper_flow, registry, state as bot_state, views
 from ..bot.ui import Reply, do
 from ..models.study import VocabCard
 from ..providers import get_provider
@@ -395,6 +395,9 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
     low = t.lower()
     if low in ("/start", "/help", "start", "help"):
         return HELP
+    remembered = memory.handle_memory(db, t)  # /remember /forget
+    if remembered is not None:
+        return remembered
     read = reading.handle_reading(db, provider, t)  # /read /summary /topic ... (also /word cap)
     if read is not None:
         return read
@@ -437,7 +440,14 @@ def handle_text(db, provider, text: str, history: list[dict] | None = None) -> s
         return _mark_done(db, t)
     if t.startswith("/"):
         return "Noma'lum buyruq. /help ni bosing."
-    return provider.chat(t, system=SYSTEM_PROMPT, history=history)
+    # Plain conversation: give Claude the recent messages and the saved facts,
+    # because every call starts from nothing.
+    if history is None:
+        history = memory.recent_history(db)
+    reply = provider.chat(t, system=memory.system_prompt(db, SYSTEM_PROMPT), history=history)
+    if getattr(provider, "ai_available", False) and not reply.startswith("⚠️"):
+        memory.remember_turn(db, t, reply)  # never store error messages as "memory"
+    return reply
 
 
 def handle_message(db, provider, text: str, history: list[dict] | None = None) -> Reply:
@@ -466,6 +476,8 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
             return views.more_screen()
         if cmd == "/bugun":
             return views.today_view(db)
+        if cmd == "/memory":
+            return memory.facts_reply(db)
         if cmd == "/photo":
             return views.photo_help()
         if cmd == "/diary" and len(t.split()) == 1:
@@ -500,6 +512,11 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
     if pending:
         reply = flows.answer(db, pending, t, lambda line: handle_text(db, provider, line, history))
         return reply.with_next(views.best_next(db, skip=pending))
+    fact = memory.intent_fact(t)  # "eslab qol: ..." in plain words
+    if fact is not None:
+        saved, why = memory.add_fact(db, fact)
+        return Reply(f"🧠 Eslab qoldim: {saved.text}" if saved else why,
+                     [[do("🧠 Eslab qolganlarim", "/memory")]])
     return Reply(handle_text(db, provider, t, history)).with_next(views.best_next(db))
 
 

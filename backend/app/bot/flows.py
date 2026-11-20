@@ -25,6 +25,7 @@ QUESTIONS: dict[str, str] = {
     "/done": "✅ Qaysi vazifa raqami? (ro'yxat: /tasks)",
     "/topic": "🧭 Haftalik mavzu nima? Masalan: pytest",
     "/drill": "💻 Qaysi mavzuda mashq kerak? Masalan: python lists",
+    "/remember": "🧠 Nimani eslab qolay? Masalan: Men Python/Django o'rganyapman, maqsad 3 oyda junior backend.",
 }
 
 
