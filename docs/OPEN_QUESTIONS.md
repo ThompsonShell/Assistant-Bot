@@ -14,6 +14,7 @@ Siz Phase 0 ni tasdiqlash o'rniga to'g'ridan-to'g'ri amalga oshirishni buyurding
 | Q15 rasmni Claude'ga berish | Kod yozildi (API va CLI yo'llari), **CLI yo'li haqiqiy loginda hali sinalmagan**. 10 daqiqalik sinov hamon kerak |
 | Q16 rasm saqlash | Qilindi: `data/diary_photos/`, gitignore, 600 ruxsat |
 | Q17 sana | Qilindi: izoh > `/date` > sahifa > bugun, 48 soat, "Sana noto'g'ri" tugmasi |
+| Q10 Jira yozish | Qisman: `/jira add` (preview + tasdiq) bilan task yaratish ishlaydi. Oyning 1-reja importi hali yo'q |
 | Q18 matplotlib | Qo'shilmadi (Phase 7) |
 | Q19 Phase 1 hajmi | Siz hammasini birdan so'radingiz, shuning uchun 1a va 1b birga qilindi |
 | Q1, Q3, Q5, Q6, Q7-Q14 | **Ochiq**. Eng muhimi: Q1 (repo hamon public; rasmlar gitga tushmaydi, lekin `docs/` va kelajakdagi fayllar ochiq bo'ladi), Q5 (eslatmalar endi kuniga 8 tagacha), Q6 (`DISPLAY_TIMEZONE`) |

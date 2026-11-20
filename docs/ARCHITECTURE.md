@@ -135,9 +135,19 @@ Added after the plan author's snapshot: `/word /words /review /learned /recall /
 
 Changed behaviour you may not expect: `/github` now defaults to **today** (`all` shows the old list); `/today /week /month` list who did what; `/news` and the morning brief send photo cards.
 
-## 8. Jira (`app/integrations/jira.py`)
+## 8. Jira (`app/integrations/jira.py`, `app/bot/jira_flow.py`)
 
-Read-only by design: one call, `POST /rest/api/3/search/jql` with Basic auth (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`), JQL = open issues assigned to me. **No create/update code exists.** Part 2 section 6 (import month 1) needs write access.
+Reads freely, **creates only after a preview and a tap on "Yaratish"**; it never edits, moves or deletes.
+
+- `/jira` lists my open issues; `/jira status` proves the connection (`/myself`); `/jira add <title> [ertaga|YYYY-MM-DD] [#label]` or plain words ("Jira ga task qo'sh: ...") show a preview (project, title, due date, labels) with [Yaratish] [Loyiha] [Bekor].
+- Project: `JIRA_PROJECT_KEY`, or chosen once from the account's projects with buttons and remembered (`study_kv`). Issue type: `JIRA_ISSUE_TYPE` (default Task) if the project has it, else the first ordinary type.
+- Errors are explained (401 wrong token, 403 no permission, 404 wrong URL or project, 400 the field Jira rejected). When a setting is empty, the bot names the missing variable (never its value).
+- `JIRA_BASE_URL` is tolerated with or without `https://`, with quotes, or with a pasted board URL.
+- Not yet done: import of the month-1 plan (OPEN_QUESTIONS Q10), editing and transitions.
+
+## 8a. Conversation memory (`app/bot/memory.py`)
+
+Each Claude call is independent (`claude -p` keeps no session), so the bot hands over what it should know: the last 16 messages from `chat_messages` (shared with the dashboard chat, 6000-character budget, always starting with the owner), the facts saved with `/remember` or "eslab qol: ..." (`memory_facts`, max 60), and today's date. Errors, commands, guided flows and quiz answers are not stored as chat.
 
 ## 9. Security and privacy facts
 

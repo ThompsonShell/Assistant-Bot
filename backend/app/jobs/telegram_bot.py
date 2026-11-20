@@ -22,7 +22,7 @@ from ..config import settings
 from ..db import make_engine, make_sessionmaker
 from ..models.github import GitHubEvent, GitHubRepo
 from ..models.task import Task
-from ..bot import flows, memory, paper_flow, registry, state as bot_state, views
+from ..bot import flows, jira_flow, memory, paper_flow, registry, state as bot_state, views
 from ..bot.ui import Reply, do
 from ..models.study import VocabCard
 from ..providers import get_provider
@@ -206,6 +206,21 @@ def send_review_card(http: httpx.Client, chat_id: Any, db, exclude_id: int | Non
     return True
 
 
+def _button_reply(http, session_local, chat_id: Any, message_id: Any, make_reply) -> None:
+    """Run a button's handler, disable the tapped message's buttons (a button
+    can't be tapped twice) and send what the handler returned."""
+    with session_local() as db:
+        reply = make_reply(db)
+        if reply is not None:
+            reply.with_next(views.best_next(db))
+    if reply is None:
+        return
+    _tg(http, "editMessageReplyMarkup", {
+        "chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []},
+    })
+    send_message(http, chat_id, reply.text, reply_markup=reply.markup())
+
+
 def process_callback(http, session_local, cb: dict, provider=None) -> None:
     """Handle a tap on an inline button (owner only).
 
@@ -224,16 +239,10 @@ def process_callback(http, session_local, cb: dict, provider=None) -> None:
         return
     parts = data.split(":")
     if parts[0] == "pe":  # paper diary buttons
-        with session_local() as db:
-            reply = paper_flow.on_callback(db, parts)
-            if reply is not None:
-                reply.with_next(views.best_next(db))
-        if reply is not None:
-            _tg(http, "editMessageReplyMarkup", {
-                "chat_id": chat_id, "message_id": message_id,
-                "reply_markup": {"inline_keyboard": []},   # a tapped button can't be tapped twice
-            })
-            send_message(http, chat_id, reply.text, reply_markup=reply.markup())
+        _button_reply(http, session_local, chat_id, message_id, lambda db: paper_flow.on_callback(db, parts))
+        return
+    if parts[0] in ("jc", "jp"):  # Jira: create / change project / pick project
+        _button_reply(http, session_local, chat_id, message_id, lambda db: jira_flow.on_callback(db, parts))
         return
     if parts[0] != "rv" or len(parts) < 2:
         return
@@ -478,6 +487,10 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
             return views.today_view(db)
         if cmd == "/memory":
             return memory.facts_reply(db)
+        if cmd == "/jira" and len(t.split()) > 1:  # /jira add | status | project
+            jira_reply = jira_flow.command(db, t)
+            if jira_reply is not None:
+                return jira_reply
         if cmd == "/photo":
             return views.photo_help()
         if cmd == "/diary" and len(t.split()) == 1:
@@ -508,10 +521,18 @@ def handle_message(db, provider, text: str, history: list[dict] | None = None) -
     if st and st[0].startswith("paper:"):  # answering a paper-diary question
         return paper_flow.answer(db, st, t).with_next(views.best_next(db))
 
+    if st and st[0].startswith("jira:"):  # a title (or a new title) for the Jira task
+        if st[0] == "jira:project":
+            return Reply("Loyihani yuqoridagi tugmalardan tanlang.", [[jira_flow.CANCEL]])
+        return jira_flow.answer(db, st, t)
+
     pending = flows.pending_command(db)
     if pending:
         reply = flows.answer(db, pending, t, lambda line: handle_text(db, provider, line, history))
         return reply.with_next(views.best_next(db, skip=pending))
+    task = jira_flow.intent(t)  # "Jira ga task qo'sh: ..." in plain words
+    if task is not None:
+        return jira_flow.from_text(db, task)
     fact = memory.intent_fact(t)  # "eslab qol: ..." in plain words
     if fact is not None:
         saved, why = memory.add_fact(db, fact)
@@ -636,28 +657,24 @@ def _channels_text() -> str:
 
 
 def _jira_text() -> str:
-    """/jira — list the Jira issues assigned to the owner (read-only).
+    """/jira — list the Jira issues assigned to the owner.
 
-    Guides the user to configure credentials when Jira isn't set up, and
-    reports network/auth errors as a friendly message instead of crashing.
+    When Jira is not set up, says exactly which settings are missing (names only,
+    never values); when a call fails, says why (wrong token, wrong URL, ...).
     """
-    from ..integrations.jira import fetch_my_issues, format_issues, is_configured
+    from ..integrations import jira
 
-    if not is_configured():
-        return (
-            "📋 Jira hali ulanmagan.\n\n"
-            ".env'ga qo'shing:\n"
-            "JIRA_BASE_URL=https://sayt.atlassian.net\n"
-            "JIRA_EMAIL=email@example.com\n"
-            "JIRA_API_TOKEN=<token>\n\n"
-            "Token: id.atlassian.com/manage-profile/security/api-tokens"
-        )
+    if not jira.is_configured():
+        return jira_flow.not_configured().text
     try:
-        issues = fetch_my_issues()
+        issues = jira.fetch_my_issues()
+    except jira.JiraError as exc:
+        logger.warning("jira fetch failed", extra={"extra_fields": {"error": exc.user_message[:200]}})
+        return f"📋 Jira ma'lumotini olib bo'lmadi: {exc.user_message}"
     except Exception as exc:  # noqa: BLE001
         logger.warning("jira fetch failed", extra={"extra_fields": {"error": str(exc)[:200]}})
-        return "📋 Jira ma'lumotini olib bo'lmadi. Token yoki URL ni tekshiring."
-    return format_issues(issues)
+        return "📋 Jira ma'lumotini olib bo'lmadi. Token yoki URL ni tekshiring: /jira status"
+    return jira.format_issues(issues)
 
 
 def _weather_text() -> str:

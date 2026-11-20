@@ -2,6 +2,10 @@
 
 Newest first. One entry per feature or fix.
 
+## 2026-11-20
+- **Memory:** the Telegram chat now remembers (last 16 messages shared with the dashboard chat, saved facts via `/remember` / `/memory` / `/forget`, today's date). Alembic 0008.
+- **Jira:** `/jira add`, `/jira status`, `/jira project`, and plain-words requests; preview then create; clear error reasons; missing settings are named. Fixed a bug where request headers were passed twice.
+
 ## 2026-11-19 (evening)
 - **Bot UX:** bare commands start guided conversations (`conversation_state`, Alembic 0006); `/start` and `/help` show a short inline main menu (Bugun, Kundalik, So'z qo'shish, Takrorlash, Imtihon, Statistika, Yana); every reply ends with one best-next-action button; empty states offer a fixing button; unconfigured features are hidden; one command registry feeds all lists. `/bugun` added.
 - **Diary checklist:** `/diary` shows input, output, words (3/day) and the paper photo with a button for each missing item. Evening reminder asks for the photo.

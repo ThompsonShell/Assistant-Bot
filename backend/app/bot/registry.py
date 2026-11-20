@@ -58,7 +58,7 @@ COMMANDS: list[Cmd] = [
     Cmd("repos", "Kuzatilayotgan repolar", G_GIT),
     Cmd("news", "Yangiliklar (/news space — kosmos)", G_WORLD, needs="news"),
     Cmd("weather", "Ob-havo va kiyim", G_WORLD),
-    Cmd("jira", "Jira issue'lar", G_WORLD, needs="jira"),
+    Cmd("jira", "Jira: issue'lar, /jira add <nom>, /jira status", G_WORLD, needs="jira"),
     Cmd("channels", "Kuzatilayotgan kanallar", G_WORLD, needs="channels"),
     Cmd("remember", "Bot eslab qolsin (doimiy xotira)", G_OTHER),
     Cmd("memory", "Bot nimalarni eslab qolgan", G_OTHER),

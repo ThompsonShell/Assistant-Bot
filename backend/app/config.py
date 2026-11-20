@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     jira_base_url: str | None = None      # e.g. https://yoursite.atlassian.net
     jira_email: str | None = None         # your Atlassian account email
     jira_api_token: str | None = None     # API token (secret — keep in .env)
+    # Where "/jira add" creates tasks. Leave empty to pick a project in the bot
+    # (the choice is remembered).
+    jira_project_key: str | None = None
+    jira_issue_type: str = "Task"
 
     # GitHub monitoring (read-only)
     github_token: str | None = None

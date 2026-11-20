@@ -19,7 +19,7 @@ EMPTY_STATES: dict[str, tuple[str, Button]] = {
     "/quiz": ("material yo'q", do("➕ So'z qo'shish", "/word")),
     "/github": ("hodisa yo'q", do("📆 Haftani ko'rish", "/github week")),
     "/tried": ("Hali texnik o'qish yo'q", do("📖 Texnik maqola", "/read tech")),
-    "/jira": ("hali ulanmagan", do("🏠 Menyu", "/menu")),
+    "/jira": ("ulanmagan", do("🏠 Menyu", "/menu")),
     "/channels": ("kuzatilmayapti", do("🏠 Menyu", "/menu")),
 }
 
@@ -181,6 +181,8 @@ def more_screen() -> Reply:
     if registry.is_available(next(c for c in registry.COMMANDS if c.name == "news")):
         rows.append([do("🌍 Yangiliklar", "/news"), do("🚀 Kosmos", "/news space")])
     extra: list[Button] = []
+    if registry.is_available(next(c for c in registry.COMMANDS if c.name == "jira")):
+        extra.append(do("➕ Jira task", "/jira add"))
     for name, label in (("jira", "📋 Jira"), ("channels", "📣 Kanallar")):
         if registry.is_available(next(c for c in registry.COMMANDS if c.name == name)):
             extra.append(do(label, f"/{name}"))
