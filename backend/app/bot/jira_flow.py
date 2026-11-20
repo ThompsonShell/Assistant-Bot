@@ -16,7 +16,7 @@ import re
 from ..config import settings
 from ..integrations import jira
 from ..study import reading, service as study
-from . import state
+from . import runtime, state
 from .ui import Reply, do
 
 CANCEL = ("❌ Bekor qilish", "do:/cancel")
@@ -143,7 +143,8 @@ def not_configured() -> Reply:
         f"Yetishmayotgan sozlamalar: {', '.join(missing)}\n\n"
         "Ularni Assistant-Bot/.env fayliga yozing (boshqa loyihaning .env fayliga emas), "
         "so'ng botni qayta ishga tushiring: ./scripts/run-local.sh\n\n"
-        "Token: id.atlassian.com/manage-profile/security/api-tokens",
+        "Token: id.atlassian.com/manage-profile/security/api-tokens\n\n"
+        "Sozlama bor-u, baribir shu xabar chiqsa: ./scripts/check-jira.sh\n" + runtime.footer(),
         [[do("🏠 Menyu", "/menu")]],
     )
 
@@ -208,7 +209,7 @@ def status() -> Reply:
     project = jira.project_key_from_env()
     return Reply(
         f"✅ Jira ulangan: {me.get('displayName', '?')}\n"
-        f"🗂 Loyiha: {project or 'tanlanmagan (/jira add da so‘raladi)'}",
+        f"🗂 Loyiha: {project or 'tanlanmagan (/jira add da so‘raladi)'}\n{runtime.footer()}",
         [[do("➕ Task qo'shish", "/jira add"), do("📋 Issue'lar", "/jira")]],
     )
 
